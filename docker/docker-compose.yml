@@ -1,0 +1,24 @@
+# リポジトリルートから:
+#   docker compose -f docker/docker-compose.yml build
+#   docker compose -f docker/docker-compose.yml run --rm magp bash
+#
+# 実機 Jetson では使わない。
+services:
+  magp:
+    image: magp-dev:humble
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    working_dir: /ws
+    volumes:
+      - ..:/ws
+    network_mode: host
+    ipc: host
+    stdin_open: true
+    tty: true
+    environment:
+      - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-0}
+      - DISPLAY=${DISPLAY:-}
+    # ホストにジョイスティックがあるときだけ有効化
+    # devices:
+    #   - /dev/input/js0

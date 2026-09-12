@@ -1,0 +1,12 @@
+# MAGP_kada Python deps (torch は入れない — PC / Jetson で wheel が違う)
+# インストールは scripts/setup.sh 経由。pip 直叩きはしない。
+#
+# Tested: Ubuntu 22.04 / Python 3.10 / ROS 2 Humble
+
+numpy==1.26.4
+pandas==2.2.2
+rosbags==0.10.9
+pyserial==3.5
+adafruit-blinka==8.39.1
+adafruit-circuitpython-busdevice==5.2.9
+adafruit-circuitpython-pca9685==3.4.11
