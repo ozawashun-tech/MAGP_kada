@@ -20,7 +20,7 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'pwm_controller = pwm_controller.pwm_controller:main'
+            'pwm_pca9685_controller = pwm_controller.pwm_pca9685_controller:main',
         ],
     },
 )

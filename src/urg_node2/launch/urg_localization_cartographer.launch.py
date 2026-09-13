@@ -23,10 +23,19 @@ def generate_launch_description():
     
     configuration_basename = LaunchConfiguration('configuration_basename', 
         default='magp_2d_localization.lua')
-    
-    # suzlab20251026ディレクトリ内のmap.pbstreamを使用
-    map_filename = LaunchConfiguration('map_filename',
-        default='/home/jetson/magp_ws/data/map/suzlab20251027/map.pbstream')
+
+    default_map = os.environ.get(
+        'MAGP_MAP_PBSTREAM',
+        os.path.join(
+            os.path.expanduser('~'),
+            'MAGP_kada',
+            'data',
+            'map',
+            'suzlab20251027',
+            'map.pbstream',
+        ),
+    )
+    map_filename = LaunchConfiguration('map_filename', default=default_map)
     
     resolution = LaunchConfiguration('resolution', default='0.05')
     publish_period_sec = LaunchConfiguration('publish_period_sec', default='1.0')
@@ -34,7 +43,7 @@ def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument(
             'map_filename',
-            default_value='/home/jetson/magp_ws/data/map/suzlab20251027/map.pbstream',
+            default_value=default_map,
             description='Full path to the .pbstream map file'
         ),
         
@@ -68,7 +77,7 @@ def generate_launch_description():
             arguments=[
                 '-configuration_directory', cartographer_config_dir, 
                 '-configuration_basename', configuration_basename,
-                '-load_state_filename', '/home/jetson/magp_ws/data/map/suzlab20251027/map.pbstream'
+                '-load_state_filename', map_filename
             ],
         ),
     ])

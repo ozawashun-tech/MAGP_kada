@@ -2,12 +2,9 @@
 from launch import LaunchDescription
 from launch.actions import ExecuteProcess
 from launch_ros.actions import Node
-import os
+
 
 def generate_launch_description():
-    # ホームディレクトリのパスを取得
-    home_dir = os.path.expanduser('~')
-    
     return LaunchDescription([
         # joy_nodeを起動
         # Node(
@@ -46,9 +43,10 @@ def generate_launch_description():
             output='screen'
         ),
         
-        # Pythonスクリプトを起動
-        ExecuteProcess(
-            cmd=['python3', f'{home_dir}/magp_ws/src/controller/pwm_controller/pwm_controller/pwm_pca9685_controller.py'],
+        Node(
+            package='pwm_controller',
+            executable='pwm_pca9685_controller',
+            name='pwm_pca9685_controller',
             output='screen'
         ),
         

@@ -77,7 +77,7 @@ Jetson Orin NX + UST-10LXという組み合わせにより、1/10スケールの
 ### 1. ビルド
 
 ```bash
-cd magp_ws
+cd MAGP_kada
 make build
 # または: colcon build --symlink-install
 ```

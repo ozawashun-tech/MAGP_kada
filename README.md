@@ -77,7 +77,7 @@ The Jetson Orin NX + UST-10LX combination provides research-grade compute and se
 ### 1. Build
 
 ```bash
-cd magp_ws
+cd MAGP_kada
 make build
 # or: colcon build --symlink-install
 ```
