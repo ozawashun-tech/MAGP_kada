@@ -18,7 +18,7 @@ MAGP uses a high-spec configuration relative to its mini car form factor — **N
 
 | # | Component | Model / Link | Notes |
 |---|-----------|-------------|-------|
-| 1 | RC car chassis | [Tamiya TT-02](https://www.tamiya.com/cms/english/rc/rcmanual/tt02.pdf) | 1/10-scale, belt-driven 4WD. Includes ESC and steering servo. |
+| 1 | RC car chassis | CARTEN M210 | 1/10-scale touring car chassis |
 | 2 | 2D LiDAR | Hokuyo UST-10LX | Ethernet, 270°, 40 m range. Ethernet cable included. |
 | 3 | SBC | NVIDIA Jetson Orin NX 16GB | 157 TOPS, 8-core Cortex-A78AE, 16GB LPDDR5, GbE × 1 |
 | 4 | SBC case | [Amazon](https://amzn.asia/d/0bSVL3AZ) | Any case that fits the chassis |
@@ -40,15 +40,14 @@ MAGP uses a high-spec configuration relative to its mini car form factor — **N
 
 Gather all components listed in the BOM above. Confirm that:
 - The LiPo battery is charged.
-- The TT-02 kit contents are complete (motor, ESC, servo, chassis parts).
+- The CARTEN M210 chassis parts are on hand.
 - The PCA9685 is soldered (header pins and terminal block).
 
 ---
 
 ## Step 1 — Assemble the RC Car
 
-Assemble the Tamiya TT-02 chassis following the official manual:
-[https://www.tamiya.com/cms/english/rc/rcmanual/tt02.pdf](https://www.tamiya.com/cms/english/rc/rcmanual/tt02.pdf)
+Assemble the CARTEN M210 chassis following the manufacturer's manual.
 
 Complete the standard assembly up through mounting the ESC and servo. Do **not** mount a receiver — the PCA9685 will take its place.
 
@@ -71,7 +70,7 @@ The power topology is as follows:
 ```
 
 1. Connect the LiPo battery (Tamiya plug) to a splitter cable.
-2. Route one branch to the ESC's battery input (the existing Tamiya connector on the TT-02).
+2. Route one branch to the ESC's battery input (Tamiya connector).
 3. Route the other branch to the DC-DC boost converter input. Set the output to **12V**.
 4. From the boost converter output, split again:
    - One branch to the LiDAR power input.
@@ -153,7 +152,7 @@ MAGPは、1/10スケールのミニカーサイズながら研究用途として
 
 | # | 部品 | 型番 / リンク | 備考 |
 |---|------|-------------|------|
-| 1 | RCカーシャーシ | [Tamiya TT-02](https://www.tamiya.com/cms/english/rc/rcmanual/tt02.pdf) | 1/10スケール、ベルト駆動4WD。ESC・ステアリングサーボ付属。 |
+| 1 | RCカーシャーシ | CARTEN M210 | 1/10スケールのツーリングカーシャーシ |
 | 2 | 2D LiDAR | 北陽電機 UST-10LX | Ethernet接続、270°、測定距離40 m。Ethernetケーブル付属。 |
 | 3 | SBC | NVIDIA Jetson Orin NX 16GB | 157 TOPS、8コア Cortex-A78AE、16GB LPDDR5、GbE × 1 |
 | 4 | SBCケース | [Amazon](https://amzn.asia/d/0bSVL3AZ) | シャーシに収まるものであれば何でもよい |
@@ -175,15 +174,14 @@ MAGPは、1/10スケールのミニカーサイズながら研究用途として
 
 上記の部品リストを揃えます。以下を確認してください：
 - リポバッテリーが充電されていること
-- TT-02キットの内容物が揃っていること（モーター、ESC、サーボ、シャーシパーツ）
+- CARTEN M210のシャーシパーツが揃っていること
 - PCA9685のハンダ付けが完了していること（ピンヘッダとターミナルブロック）
 
 ---
 
 ## ステップ 1 — RCカーの組み立て
 
-Tamiya TT-02の公式マニュアルに従ってシャーシを組み立てます：
-[https://www.tamiya.com/cms/english/rc/rcmanual/tt02.pdf](https://www.tamiya.com/cms/english/rc/rcmanual/tt02.pdf)
+CARTEN M210をメーカーのマニュアルに従って組み立てます。
 
 ESCとサーボを取り付けるところまで標準組み立てを完了させます。**受信機は取り付けない**でください（代わりにPCA9685を使用します）。
 
@@ -206,7 +204,7 @@ ESCとサーボを取り付けるところまで標準組み立てを完了さ�
 ```
 
 1. リポバッテリー（タミヤプラグ）を分岐ケーブルに接続します。
-2. 一方をTT-02のESCバッテリー入力（既存のタミヤコネクタ）に接続します。
+2. 一方をESCのバッテリー入力（タミヤコネクタ）に接続します。
 3. もう一方をDC-DC昇圧コンバータの入力に接続し、出力を **12V** に設定します。
 4. 昇圧コンバータの出力をさらに分岐します：
    - 一方をLiDARの電源入力に接続します。

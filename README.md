@@ -50,7 +50,9 @@ Side channels:
 
 | Component | Model |
 |-----------|-------|
-| RC car chassis | [Tamiya TT-02](https://www.tamiya.com/cms/english/rc/rcmanual/tt02.pdf) |
+| RC car chassis | CARTEN M210 |
+| Motor | Tamiya TBLM-02S Brushless Motor 02 (sensored) 21.5T, item no. 54895 |
+| ESC | Tamiya TBLE-02S Brushless ESC 02 (sensored), item no. 45057 |
 | 2D LiDAR | Hokuyo UST-10LX (Ethernet, cable included) |
 | SBC | NVIDIA Jetson Orin NX |
 | SBC case | Any compatible case (e.g. [Amazon](https://amzn.asia/d/0bSVL3AZ)) |

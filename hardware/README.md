@@ -19,7 +19,7 @@ hardware/
 ### base\_plate
 
 A mounting plate designed to be 3D-printed and used to fix various components
-(Jetson, LiDAR, PCA9685, etc.) onto the Tamiya TT-02 chassis.
+(Jetson, LiDAR, PCA9685, etc.) onto the CARTEN M210 chassis.
 
 **Recommended print settings:**
 - Material: PLA or PETG
@@ -29,7 +29,7 @@ A mounting plate designed to be 3D-printed and used to fix various components
 
 ### carten210\_plate
 
-A mounting plate designed to be 3D-printed for use with the CarTen M210 chassis.
+A mounting plate designed to be 3D-printed for use with the CARTEN M210 chassis.
 
 **Recommended print settings:**
 - Material: PLA or PETG

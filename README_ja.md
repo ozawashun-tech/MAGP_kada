@@ -50,7 +50,9 @@
 
 | 部品 | 型番 |
 |------|------|
-| RCカーシャーシ | [Tamiya TT-02](https://www.tamiya.com/cms/english/rc/rcmanual/tt02.pdf) |
+| RCカーシャーシ | CARTEN M210 |
+| モーター | タミヤ TBLM-02S ブラシレスモーター02（センサー付き）21.5T、品番 54895 |
+| ESC | タミヤ TBLE-02S ブラシレス ESC 02（センサー付き）、品番 45057 |
 | 2D LiDAR | 北陽電機 UST-10LX（Ethernet接続、ケーブル付属） |
 | シングルボードコンピュータ | NVIDIA Jetson Orin NX |
 | SBCケース | 対応ケース（例：[Amazon](https://amzn.asia/d/0bSVL3AZ)、他でも可） |
