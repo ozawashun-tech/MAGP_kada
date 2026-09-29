@@ -57,6 +57,7 @@ Side channels:
 | SBC | NVIDIA Jetson Orin NX |
 | SBC case | Any compatible case (e.g. [Amazon](https://amzn.asia/d/0bSVL3AZ)) |
 | PWM driver | PCA9685 breakout board (I2C) |
+| IMU | BNO085 breakout board (I2C, separate bus from PCA9685) |
 | LiPo battery | [7.4V 2S](https://amzn.asia/d/3W8HEnf) |
 | DC-DC boost converter | [7.4V → 12V](https://amzn.asia/d/dPUERnJ) |
 | Tamiya plug | [connector](https://amzn.asia/d/3aU40sA) |
@@ -72,6 +73,7 @@ The Jetson Orin NX + UST-10LX combination provides research-grade compute and se
 - Python 3.10+
 - PyTorch 2.x
 - `adafruit-circuitpython-pca9685`
+- `adafruit-circuitpython-bno08x`, `adafruit-extended-bus` (IMU)
 - `pyserial` (for M5Stack visualizer)
 
 ## Quick Start
@@ -148,6 +150,7 @@ In autonomous mode, hold **L2** to blend manual input with the model output.
 | [pytorch_pwm_controller](src/pytorch_pwm_controller/) | `nn_pwm_controller_node` | PyTorch Transformer inference, publishes PWM commands |
 | [mux_pwm](src/mux_pwm/) | `pwm_mux_node` | Manual/auto PWM multiplexer with joystick blending |
 | [pwm_controller](src/controller/pwm_controller/) | `pwm_pca9685_controller` | PCA9685 I2C hardware PWM driver |
+| [bno085_imu](src/sensors/bno085_imu/) | `bno085_imu_node` | BNO085 IMU driver (I2C), publishes `/imu/data` |
 | [bag_recorder](src/tools/bag_recorder/) | `bag_recorder_node` | Joystick-controlled rosbag recorder |
 | [m5stack_visualizer](src/tools/m5stack_visualizer/) | `m5stack_bridge_node` | Serial bridge to M5Stack Core2 display |
 | [urg_node2](src/urg_node2/) | `urg_node2` | Hokuyo 2D LiDAR driver (by Hokuyo / eSOL) |

@@ -205,7 +205,8 @@ fi
 python3 - <<'PY'
 import importlib.util
 print("  python:", __import__("sys").version.split()[0])
-for name in ("numpy", "pandas", "rosbags", "serial", "adafruit_pca9685"):
+for name in ("numpy", "pandas", "rosbags", "serial", "adafruit_pca9685",
+             "adafruit_bno08x", "adafruit_extended_bus"):
     spec = importlib.util.find_spec(name)
     print(f"  {name}: {'ok' if spec else 'MISSING'}")
 try:

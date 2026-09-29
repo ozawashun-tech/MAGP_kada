@@ -2,7 +2,7 @@ bag_recorder_node:
   ros__parameters:
     # 記録設定
     record_all_topics: false
-    topic_list: [/pwm_input, /scan]
+    topic_list: [/pwm_input, /scan, /imu/data]
     
     # 保存先設定
     save_directory: '/home/jetson/rosbag/'

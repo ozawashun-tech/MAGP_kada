@@ -1,0 +1,20 @@
+bno085_imu_node:
+  ros__parameters:
+    # I2C 設定（PCA9685 とは別バス。i2cdetect -l で番号を確認）
+    i2c_bus: 1
+    i2c_address: 74     # 0x4A。DI を High にした場合は 75 (0x4B)
+
+    # 出力設定
+    frame_id: 'imu_link'
+    topic: '/imu/data'
+    rate_hz: 100.0
+
+    # 共分散（対角成分の標準偏差）
+    orientation_stddev: 0.02          # rad
+    angular_velocity_stddev: 0.01     # rad/s
+    linear_acceleration_stddev: 0.1   # m/s^2
+
+    # エラー時の再接続
+    max_consecutive_errors: 10
+    stale_timeout_sec: 1.0
+    reconnect_interval_sec: 2.0
