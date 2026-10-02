@@ -30,7 +30,7 @@ class Bno085ImuNode(Node):
         self.declare_parameter('i2c_address', 0x4A)
         self.declare_parameter('frame_id', 'imu_link')
         self.declare_parameter('topic', '/imu/data')
-        self.declare_parameter('rate_hz', 100.0)
+        self.declare_parameter('rate_hz', 50.0)  # 100Hz は I2C が飽和する
         self.declare_parameter('orientation_stddev', 0.02)  # rad
         self.declare_parameter('angular_velocity_stddev', 0.01)  # rad/s
         self.declare_parameter('linear_acceleration_stddev', 0.1)  # m/s^2
@@ -68,8 +68,8 @@ class Bno085ImuNode(Node):
 
         self._connect()
 
-        # センサのレポート周期との位相ずれで取りこぼさないよう、2倍の周期でポーリングする
-        self.timer = self.create_timer(1.0 / (self.rate_hz * 2.0), self.timer_callback)
+        # 3種類のレポートは別々のタイミングで届くので、値の変化ではなく一定周期で publish する
+        self.timer = self.create_timer(1.0 / self.rate_hz, self.timer_callback)
 
     @staticmethod
     def _diag_covariance(variance):
@@ -129,16 +129,16 @@ class Bno085ImuNode(Node):
             return
         self.consecutive_errors = 0
 
-        # ライブラリは最後の値を保持し続けるので、値が変わったときだけ新しいサンプルとみなす
+        # ライブラリは最後の値を保持し続けるので、値がまったく変わらない状態が続いたら停止とみなす
         now = time.monotonic()
         sample = (quat, gyro, accel)
-        if sample == self.last_sample:
-            if now - self.last_sample_time > self.stale_timeout_sec:
-                self.get_logger().warn('BNO085 のデータが更新されないため再接続します')
-                self._disconnect()
+        if sample != self.last_sample:
+            self.last_sample = sample
+            self.last_sample_time = now
+        elif now - self.last_sample_time > self.stale_timeout_sec:
+            self.get_logger().warn('BNO085 のデータが更新されないため再接続します')
+            self._disconnect()
             return
-        self.last_sample = sample
-        self.last_sample_time = now
 
         msg = Imu()
         msg.header.stamp = self.get_clock().now().to_msg()

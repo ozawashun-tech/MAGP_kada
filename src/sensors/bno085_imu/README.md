@@ -24,7 +24,7 @@ Wire it to a **separate I2C bus** from the PCA9685 (see [docs/hardware.md](../..
 | `i2c_address` | `0x4A` | `0x4B` when DI is pulled high |
 | `frame_id` | `imu_link` | |
 | `topic` | `/imu/data` | |
-| `rate_hz` | `100.0` | Sensor report rate |
+| `rate_hz` | `50.0` | Sensor report and publish rate. 100 Hz saturates the 100 kHz I2C bus (drops to ~10 Hz) |
 | `orientation_stddev` | `0.02` | rad |
 | `angular_velocity_stddev` | `0.01` | rad/s |
 | `linear_acceleration_stddev` | `0.1` | m/s² |

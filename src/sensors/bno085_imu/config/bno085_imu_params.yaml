@@ -7,7 +7,7 @@ bno085_imu_node:
     # 出力設定
     frame_id: 'imu_link'
     topic: '/imu/data'
-    rate_hz: 100.0
+    rate_hz: 50.0       # 100Hz は I2C（100kHz）が飽和して約10Hzに落ちる
 
     # 共分散（対角成分の標準偏差）
     orientation_stddev: 0.02          # rad
