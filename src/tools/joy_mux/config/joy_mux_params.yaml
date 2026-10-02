@@ -1,0 +1,6 @@
+joy_mux_node:
+  ros__parameters:
+    # 購読するjoyトピックのリスト（認識されているジョイスティック分だけ追加）
+    input_topics: ['/joy0', '/joy1']
+    # 集約後の出力トピック（mux_pwm, bag_recorderが購読する /joy に合わせる）
+    output_topic: '/joy'
