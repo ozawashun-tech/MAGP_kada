@@ -1,3 +1,4 @@
+import numpy as np
 import torch
 import torch.nn as nn
 from dataset import (
@@ -47,33 +48,27 @@ def compute_normalization_stats(dataset):
     """
     print("\nComputing normalization statistics...")
 
-    # 全データを収集
-    all_scans = []
-    all_targets = []
-
+    # 全サンプルを一度にメモリへ載せず、和と二乗和を逐次集計する
+    n_scan = n_target = 0
+    s_scan = ss_scan = s_target = ss_target = 0.0
     for i in range(len(dataset)):
         scan, target = dataset[i]
-        # numpy配列の場合はテンソルに変換
-        if not isinstance(scan, torch.Tensor):
-            scan = torch.from_numpy(scan)
-        if not isinstance(target, torch.Tensor):
-            target = torch.from_numpy(target)
+        scan = np.asarray(scan, dtype=np.float64)
+        target = np.asarray(target, dtype=np.float64)
+        n_scan += scan.size
+        s_scan += scan.sum()
+        ss_scan += (scan**2).sum()
+        n_target += target.size
+        s_target += target.sum()
+        ss_target += (target**2).sum()
 
-        all_scans.append(scan)
-        all_targets.append(target)
+    def mean_std(n, s, ss):
+        mean = s / n
+        var = (ss - n * mean**2) / (n - 1)
+        return torch.tensor(mean, dtype=torch.float32), torch.tensor(var**0.5, dtype=torch.float32)
 
-    # テンソルに変換
-    all_scans = torch.stack(all_scans)  # (N, scan_history_length, scan_dim)
-    all_targets = torch.stack(all_targets)  # (N, prediction_steps, 2)
-
-    # 平均と標準偏差を計算
-    # スキャンデータ: 全履歴・全次元で統計量を計算
-    scan_mean = all_scans.mean()
-    scan_std = all_scans.std()
-
-    # ターゲットデータ: 全ステップ・全次元で統計量を計算
-    target_mean = all_targets.mean()
-    target_std = all_targets.std()
+    scan_mean, scan_std = mean_std(n_scan, s_scan, ss_scan)
+    target_mean, target_std = mean_std(n_target, s_target, ss_target)
 
     print(f"  Scan - mean: {scan_mean:.4f}, std: {scan_std:.4f}")
     print(f"  Target - mean: {target_mean:.4f}, std: {target_std:.4f}")
@@ -416,8 +411,8 @@ def train_model(
 
 if __name__ == "__main__":
     train_model(
-        bag_paths="../dataset/train/20260401",
-        model_save_path="../model/transformer/model.pth",
+        bag_paths="../dataset/train/rosbag2_2026_10_07-09_16_54_1",
+        model_save_path="../model/transformer/my_model_20261007.pth",
         scan_history_length=20,
         scan_history_stride=10,
         prediction_steps=1,

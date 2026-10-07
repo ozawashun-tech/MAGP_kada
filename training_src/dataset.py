@@ -47,6 +47,11 @@ def load_rosbag_data(bag_path):
     joy_data = []
     scan_data = []
 
+    # Reader は metadata.yaml のある bag ディレクトリを要求する
+    bag_path = Path(bag_path)
+    if bag_path.is_file():
+        bag_path = bag_path.parent
+
     with Reader(bag_path) as reader:
         for connection, timestamp, rawdata in reader.messages():
             msg = typestore.deserialize_cdr(rawdata, connection.msgtype)
@@ -309,8 +314,10 @@ class RosbagDataset(torch.utils.data.Dataset):
             for i in range(len(joy_df))
         ], dtype=np.float32)
         
-        # 有効なサンプルを事前に作成
-        self.scan_histories = []
+        # スキャンは1回だけ保持し、各サンプルは履歴のインデックスだけを持つ
+        # （履歴を丸ごとコピーすると全サンプルで数十GBになるため）
+        self.all_scans = all_scans.astype(np.float32)
+        self.history_indices = []
         self.targets = []
         
         for idx in range(len(scan_df)):
@@ -361,28 +368,26 @@ class RosbagDataset(torch.utils.data.Dataset):
                 if scan_indices[i] is None:
                     scan_indices[i] = first_valid_idx
 
-            scan_history = all_scans[scan_indices]
-            
             # ターゲット（未来のアクション）を取得
             target_indices = [idx + i for i in range(1, prediction_steps + 1)]
             targets = all_actions[target_indices]
             
-            self.scan_histories.append(scan_history)
+            self.history_indices.append(scan_indices)
             self.targets.append(targets)
         
         # リストからnumpy配列に変換
-        self.scan_histories = np.array(self.scan_histories, dtype=np.float32)
+        self.history_indices = np.array(self.history_indices, dtype=np.int64)
         self.targets = np.array(self.targets, dtype=np.float32)
         
-        print(f"  Created {len(self.scan_histories)} samples")
-        print(f"  Scan histories shape: {self.scan_histories.shape}")
+        print(f"  Created {len(self.history_indices)} samples")
+        print(f"  Scan histories shape: {self.history_indices.shape + self.all_scans.shape[1:]}")
         print(f"  Targets shape: {self.targets.shape}")
 
     def __len__(self):
-        return len(self.scan_histories)
+        return len(self.history_indices)
 
     def __getitem__(self, idx):
-        scan_history = self.scan_histories[idx].copy()
+        scan_history = self.all_scans[self.history_indices[idx]]
         targets = self.targets[idx].copy()
         
         # ノイズを追加
@@ -392,3 +397,10 @@ class RosbagDataset(torch.utils.data.Dataset):
             scan_history = scan_history + noise
         
         return scan_history, targets
+
+
+def custom_collate_fn(batch):
+    """(scan_history, targets) のリストをテンソルのバッチにまとめる"""
+    scans = torch.from_numpy(np.stack([b[0] for b in batch]).astype(np.float32))
+    targets = torch.from_numpy(np.stack([b[1] for b in batch]).astype(np.float32))
+    return scans, targets
