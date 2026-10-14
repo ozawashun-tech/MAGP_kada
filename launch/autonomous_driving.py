@@ -41,6 +41,11 @@ def generate_launch_description():
             executable='nn_pwm_controller_node',
             name='nn_pwm_controller_node',
             output='screen'
+            parameters=[{
+                'model_path': '/home/jetson/models/my_model.pth',
+                'scan_history_length': 20,
+                'scan_history_stride': 10,
+            }]
         ),
         
         Node(
