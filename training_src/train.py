@@ -411,8 +411,8 @@ def train_model(
 
 if __name__ == "__main__":
     train_model(
-        bag_paths="../dataset/train/rosbag2_2026_10_07-09_16_54_1",
-        model_save_path="../model/transformer/my_model_20261007.pth",
+        bag_paths="../dataset/train/rosbag2_2026_10_14-10_15_03_1",
+        model_save_path="../model/transformer/my_model.pth",
         scan_history_length=20,
         scan_history_stride=10,
         prediction_steps=1,
