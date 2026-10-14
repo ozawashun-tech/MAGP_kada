@@ -40,7 +40,12 @@ def generate_launch_description():
             package='pytorch_pwm_controller',
             executable='nn_pwm_controller_node',
             name='nn_pwm_controller_node',
-            output='screen'
+            output='screen',
+            parameters=[{
+                'model_path': '/home/jetson/models/my_model_20261007_1.pth',
+                'scan_history_length': 20,
+                'scan_history_stride': 10,
+            }],
         ),
         
         Node(
