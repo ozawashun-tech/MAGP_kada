@@ -7,6 +7,7 @@ from dataset import (
     custom_collate_fn,
     load_rosbags,
 )
+from jetson_sync import fetch_latest_bags
 from model import DNN
 from torch.utils.data import DataLoader, random_split
 import os
@@ -411,7 +412,7 @@ def train_model(
 
 if __name__ == "__main__":
     train_model(
-        bag_paths="../dataset/train/rosbag2_2026_10_14-10_15_03_1",
+        bag_paths=fetch_latest_bags(),
         model_save_path="../model/transformer/my_model.pth",
         scan_history_length=20,
         scan_history_stride=10,
