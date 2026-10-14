@@ -21,6 +21,8 @@ class PwmMuxNode(Node):
         self.declare_parameter('steering_right', 1740)
         self.declare_parameter('speed_deadzone', 0.05)
         self.declare_parameter('steering_deadzone', 0.05)
+        self.declare_parameter('speed_sensitivity', 1.0)  # 直進感度（スティック入力の倍率）
+        self.declare_parameter('speed_expo', 1.0)  # 直進カーブ指数（1.0=線形, >1で中央付近が穏やか）
         self.declare_parameter('manual_gain', 1.0)
         self.declare_parameter('torch_gain', 1.0) # torch_pwm倍率のデフォルト値
         self.declare_parameter('gain_step', 0.2)
@@ -39,6 +41,8 @@ class PwmMuxNode(Node):
         self.STEERING_RIGHT = self.get_parameter('steering_right').value
         self.SPEED_DEADZONE = self.get_parameter('speed_deadzone').value
         self.STEERING_DEADZONE = self.get_parameter('steering_deadzone').value
+        self.SPEED_SENSITIVITY = self.get_parameter('speed_sensitivity').value
+        self.SPEED_EXPO = self.get_parameter('speed_expo').value
         self.manual_gain = self.get_parameter('manual_gain').value
         self.torch_gain = self.get_parameter('torch_gain').value
         self.gain_step = self.get_parameter('gain_step').value
@@ -97,11 +101,24 @@ class PwmMuxNode(Node):
         elif joy_value > 0:
             # 前進: 1620 → 1100
             adjusted = (joy_value - self.SPEED_DEADZONE) / (1.0 - self.SPEED_DEADZONE)
+            adjusted = self.apply_speed_sensitivity(adjusted)
             return float(self.MOTOR_NEUTRAL - (self.MOTOR_NEUTRAL - self.MOTOR_MIN) * adjusted)
         else:
             # 後退: 1620 → 2300
             adjusted = (joy_value + self.SPEED_DEADZONE) / (1.0 - self.SPEED_DEADZONE)
+            adjusted = self.apply_speed_sensitivity(abs(adjusted))
             return float(self.MOTOR_NEUTRAL + (self.MOTOR_MAX - self.MOTOR_NEUTRAL) * abs(adjusted))
+    
+    def apply_speed_sensitivity(self, adjusted):
+        """
+        直進入力に感度カーブと倍率を適用
+        Args:
+            adjusted: デッドゾーン補正後の入力 (0.0 ~ 1.0)
+        Returns:
+            感度適用後の入力 (0.0 ~ 1.0)
+        """
+        curved = abs(adjusted) ** self.SPEED_EXPO
+        return min(1.0, curved * self.SPEED_SENSITIVITY)
     
     def convert_joy_to_steering_pwm(self, joy_value):
         """
