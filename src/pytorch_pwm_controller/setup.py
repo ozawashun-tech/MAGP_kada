@@ -29,6 +29,7 @@ setup(
     entry_points={
         'console_scripts': [
             'nn_pwm_controller_node = pytorch_pwm_controller.nn_pwm_controller_node:main',
+            'nn_imu_pwm_controller_node = pytorch_pwm_controller.nn_imu_pwm_controller_node:main',
         ],
     },
 )

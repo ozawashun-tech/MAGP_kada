@@ -1,0 +1,90 @@
+/home/suzlab/.local/lib/python3.10/site-packages/pandas/core/computation/expressions.py:21: UserWarning: Pandas requires version '2.8.4' or newer of 'numexpr' (version '2.8.1' currently installed).
+  from pandas.core.computation.check import NUMEXPR_INSTALLED
+/home/suzlab/.local/lib/python3.10/site-packages/pandas/core/arrays/masked.py:60: UserWarning: Pandas requires version '1.3.6' or newer of 'bottleneck' (version '1.3.2' currently installed).
+  from pandas.core import (
+Using device: cpu
+Run name: lidar_20261018_len20_str10_s1
+  Model: /home/suzlab/MAGP_kada/model/transformer_imu/lidar_20261018_len20_str10_s1.pth
+  Checkpoints: /home/suzlab/MAGP_kada/model/checkpoints_imu/lidar_20261018_len20_str10_s1
+
+Loading training data...
+Loading: /home/suzlab/MAGP_kada/dataset/train/rosbag2_2026_10_18-15_09_54_1
+  IMU: 7392 samples (49.8 Hz), gaps >= 1s: 0 (0.0s), invalid scans: 24/5933
+  Trimmed: 5933 -> 5814 samples (front: 1.0%, back: 1.0%)
+  Consecutive stop filtered (throttle range [1620, 2300], samples >= 10000, margin: -20/+20):
+    5814 -> 5814 samples
+    Removed 0 segments (0 samples)
+  Loaded 5814 samples
+Loading: /home/suzlab/MAGP_kada/dataset/train/rosbag2_2026_10_18-15_13_07_2
+  IMU: 4587 samples (49.8 Hz), gaps >= 1s: 0 (0.0s), invalid scans: 17/3681
+  Trimmed: 3681 -> 3608 samples (front: 1.0%, back: 1.0%)
+  Consecutive stop filtered (throttle range [1620, 2300], samples >= 10000, margin: -20/+20):
+    3608 -> 3608 samples
+    Removed 0 segments (0 samples)
+  Loaded 3608 samples
+
+Total samples: 9422
+File boundaries: [0, 5814, 9422]
+Preprocessing dataset...
+  Created 9420 samples
+  Scan histories shape: (9420, 20, 1081)
+  Targets shape: (9420, 1, 2)
+  Removed 20 samples with IMU gaps in history
+  IMU samples: 9400
+
+Loading validation data...
+Loading: /home/suzlab/MAGP_kada/dataset/train/rosbag2_2026_10_18-15_14_47_3
+  IMU: 4557 samples (49.8 Hz), gaps >= 1s: 0 (0.0s), invalid scans: 13/3657
+  Trimmed: 3657 -> 3584 samples (front: 1.0%, back: 1.0%)
+  Consecutive stop filtered (throttle range [1620, 2300], samples >= 10000, margin: -20/+20):
+    3584 -> 3584 samples
+    Removed 0 segments (0 samples)
+  Loaded 3584 samples
+
+Total samples: 3584
+File boundaries: [0, 3584]
+Preprocessing dataset...
+  Created 3583 samples
+  Scan histories shape: (3583, 20, 1081)
+  Targets shape: (3583, 1, 2)
+  IMU samples: 3583
+
+Dataset split (by bag):
+  Training: 9400 samples from ['rosbag2_2026_10_18-15_09_54_1', 'rosbag2_2026_10_18-15_13_07_2']
+  Validation: 3583 samples from ['rosbag2_2026_10_18-15_14_47_3']
+
+Loading pretrained model from /home/suzlab/MAGP_kada/model/pretrained_from_jetson/my_model_jetson_20261014.pth
+  Using normalization statistics from pretrained model
+  IMU ['angular_velocity.z'] - mean: [-0.7182809710502625], std: [1.5084961652755737]
+
+=== Stage 1: encoder frozen, lr=0.0001, epochs=100 ===
+  Trainable parameters: 688,770 / 1,223,810
+  Initial val loss: 0.391830
+Stage 1 Epoch [1/100], Train Loss: 0.214024, Val Loss: 0.290662, MAE throttle/steering: 68.8/122.3 µs
+Stage 1 Epoch [2/100], Train Loss: 0.158700, Val Loss: 0.273417, MAE throttle/steering: 63.7/117.3 µs
+Stage 1 Epoch [3/100], Train Loss: 0.136565, Val Loss: 0.286707, MAE throttle/steering: 71.8/115.8 µs
+Stage 1 Epoch [4/100], Train Loss: 0.120011, Val Loss: 0.275824, MAE throttle/steering: 58.3/117.5 µs
+Stage 1 Epoch [5/100], Train Loss: 0.104074, Val Loss: 0.291160, MAE throttle/steering: 75.4/117.9 µs
+Stage 1 Epoch [6/100], Train Loss: 0.094184, Val Loss: 0.260478, MAE throttle/steering: 50.3/119.7 µs
+Stage 1 Epoch [7/100], Train Loss: 0.083457, Val Loss: 0.292047, MAE throttle/steering: 65.0/120.5 µs
+Stage 1 Epoch [8/100], Train Loss: 0.074317, Val Loss: 0.288569, MAE throttle/steering: 63.4/123.3 µs
+Stage 1 Epoch [9/100], Train Loss: 0.065842, Val Loss: 0.282286, MAE throttle/steering: 54.6/122.8 µs
+Stage 1 Epoch [10/100], Train Loss: 0.059498, Val Loss: 0.296681, MAE throttle/steering: 68.3/121.5 µs
+  → Saved: /home/suzlab/MAGP_kada/model/checkpoints_imu/lidar_20261018_len20_str10_s1/s1_epoch_010.pth
+Stage 1 Epoch [11/100], Train Loss: 0.051829, Val Loss: 0.302570, MAE throttle/steering: 61.7/124.3 µs
+Stage 1 Epoch [12/100], Train Loss: 0.047352, Val Loss: 0.299299, MAE throttle/steering: 65.0/124.9 µs
+Stage 1 Epoch [13/100], Train Loss: 0.042421, Val Loss: 0.306793, MAE throttle/steering: 62.7/127.5 µs
+Stage 1 Epoch [14/100], Train Loss: 0.037446, Val Loss: 0.297806, MAE throttle/steering: 59.0/123.8 µs
+Stage 1 Epoch [15/100], Train Loss: 0.033236, Val Loss: 0.316072, MAE throttle/steering: 61.2/127.3 µs
+Stage 1 Epoch [16/100], Train Loss: 0.030818, Val Loss: 0.311495, MAE throttle/steering: 63.7/125.8 µs
+
+Early stopping triggered at epoch 16
+  Best val loss: 0.260478
+  → Saved: /home/suzlab/MAGP_kada/model/checkpoints_imu/lidar_20261018_len20_str10_s1/best_stage1.pth
+  → Saved: /home/suzlab/MAGP_kada/model/transformer_imu/lidar_20261018_len20_str10_s1.pth
+
+=== Results: lidar_20261018_len20_str10_s1 (LiDAR only) ===
+              val loss  throttle MAE  steering MAE
+pretrained      0.3918          55.7         143.7
+stage1          0.2605          50.3         119.7
+（pretrained は学習済みの LiDAR モデルそのまま。IMU ありでは IMU の寄与が 0 の状態）

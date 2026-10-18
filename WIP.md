@@ -4,6 +4,40 @@
 
 ---
 
+## 2026-10-18 — IMU（ヨーレート）モデルの実機走行
+
+### 目的
+オフラインで比較した IMU ありモデルと、同じデータで学習し直した LiDAR モデルを、実機で切り替えて走らせて比べる。オフラインでは差が誤差の範囲で、IMU をゼロにしても誤差がほぼ変わらなかった（[experiments.md](model/transformer_imu/experiments.md)）。なので、走りの差は小さいと予想している。
+
+### 変更内容
+- `src/pytorch_pwm_controller/pytorch_pwm_controller/nn_imu_pwm_controller_node.py`（新規）: `/scan` と `/imu/data` を購読し、`/torch_pwm` を出す。
+  - IMU の値は学習時と同じく「直前の scan から今の scan までの平均」で作る。
+  - 履歴長・stride・特徴量は、チェックポイントから読む。
+  - IMU が 1 秒以上届かないときや、使う履歴に IMU が止まっていた区間が残っているときは、中立（1620 / 1265）を出す。`pwm_mux_node` は最後の `/torch_pwm` を出し続けるので、publish を止めるだけでは車が止まらないため。
+  - IMU が戻っても、止まっていた区間が履歴から抜けるまで（約 5 秒）は中立のまま。
+- `.../model/model_imu.py`（新規）: `training_src/model_imu.py` と同じ内容。推論用の `ModelIMU` を含む。
+- `src/pytorch_pwm_controller/setup.py`: entry point `nn_imu_pwm_controller_node` を追加した。
+- `launch/autonomous_driving_imu.py`（新規）: `model:=imu`（既定）と `model:=lidar` で推論ノードを切り替える。推論ノード以外は `autonomous_driving.py` と同じ構成。
+  - `imu`: `imu_20261018_gz_len20_str10_s2_seed2.pth`
+  - `lidar`: `lidar_20261018_len20_str10_s2_seed1.pth`（Stage 2 の 3 seed のうち、検証 loss が最も低いもの）
+- 既存の `nn_pwm_controller_node.py`・`launch/autonomous_driving.py` は変更していない。`make run` で現行モデルに戻せる。
+
+### 確認状況
+- [x] `colcon build --packages-select pytorch_pwm_controller` が通った。
+- [x] 検証用の bag（`15_14_47_3`）の `/scan`・`/imu/data` を再生してノードに入れた（車は動かしていない、`ROS_DOMAIN_ID=77`）。出力はオフライン推論と一致した（ステアリングの差は中央値 0.00 µs）。記録された操作との誤差は、ステアリング 114.8 µs・スロットル 56.2 µs で、学習時の値と同じくらい。
+- [x] `/scan` だけを再生したとき（IMU なし）は、883 件すべて中立を出し、警告ログが出た。
+- [x] `lidar_20261018_len20_str10_s2_seed1.pth` を既存の `nn_pwm_controller_node` で読み込めた。
+- [ ] 実機での走行（下の TODO）
+
+### TODO（実機）
+1. `make build` のあと、`source install/setup.bash && ros2 launch launch/autonomous_driving_imu.py` で起動する。最初は `torch_gain` を下げ、PS ボタンですぐ手動に戻せる状態で走らせる。
+2. 起動ログに `Ready for inference` と `IMU OK: 推論を再開します` が出ることを確認する。
+3. 走行中に `IMU が使えないため、中立の PWM を出します` が出ないかを確認する。出たら、bno085 側の再接続ログも確認する。
+4. 同じコースで `model:=lidar` に切り替えて走らせ、ラップタイム・コースアウトの回数・ステアリングの振れを比べる。結果は `experiments.md` に追記する。
+5. 走行中に IMU のケーブルを抜く（または bno085 のノードを止める）と、1 秒ほどで止まることを確認する。必ず車を浮かせた状態で行う。
+
+---
+
 ## 2026-09-29 — IMU（BNO085）の接続（branch: `imu`）
 
 ### 目的
