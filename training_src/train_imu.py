@@ -15,7 +15,6 @@ from dataset_imu import (
     load_bags_with_imu,
     select_imu_bags,
 )
-from jetson_sync import fetch_latest_bags
 from model import DNN
 from model_imu import ENCODER_PREFIXES, DNNIMU
 from train import WeightedMSELoss, compute_normalization_stats
@@ -407,15 +406,28 @@ def train_imu_model(
 
 
 if __name__ == "__main__":
-    # Jetson から最新の bag を取ってきて、/scan・/pwm_input・/imu/data がそろったものだけ使う
-    bags = select_imu_bags(fetch_latest_bags(count=10))
-    train_bags, val_bags = split_bags(bags, val_bags=None)  # 既定では最新の 1 本を検証用にする
+    import argparse
+
+    # seed などを変えて何回も学習するため、比較で変える設定だけ引数で上書きできるようにする
+    # 例: python train_imu.py --no-imu --seed 1 --run-name lidar_20261018_len20_str10_s1_seed1
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--no-imu", action="store_true", help="ベースライン（LiDAR のみ）を学習する")
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--run-name", default=None)
+    parser.add_argument("--finetune-epochs", type=int, default=0)
+    args = parser.parse_args()
+
+    # 10/18 に Jetson から取ってきた IMU 入りの 3 本（最新の 15_14_47_3 が検証用）
+    bags = select_imu_bags(sorted((REPO_ROOT / "dataset" / "train").glob("rosbag2_2026_10_18-*")))
+    train_bags, val_bags = split_bags(bags, val_bags=None)
 
     train_imu_model(
         train_bags=train_bags,
         val_bags=val_bags,
-        pretrained_model_path=REPO_ROOT / "model" / "transformer" / "my_model.pth",
-        use_imu=True,  # False でベースライン（LiDAR のみ）
+        # Jetson の /home/jetson/models/my_model.pth（10/14 学習、今の launch で使っているモデル）のコピー
+        pretrained_model_path=REPO_ROOT / "model" / "pretrained_from_jetson" / "my_model_jetson_20261014.pth",
+        use_imu=not args.no_imu,
+        run_name=args.run_name,
         scan_history_length=20,
         scan_history_stride=10,
         prediction_steps=1,
@@ -424,9 +436,9 @@ if __name__ == "__main__":
         batch_size=32,
         epochs=100,
         learning_rate=1e-4,
-        finetune_epochs=0,  # Stage 2 を行うときは 10〜20 程度にする
+        finetune_epochs=args.finetune_epochs,  # Stage 2 を行うときは 10〜20 程度にする
         finetune_lr=1e-5,
         early_stopping_patience=10,
         checkpoint_interval=10,
-        seed=42,
+        seed=args.seed,
     )
