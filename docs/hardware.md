@@ -30,6 +30,7 @@ MAGP uses a high-spec configuration relative to its mini car form factor — **N
 | 9 | DC barrel jack pigtail cable | DC 5.5mm × 2.5mm (verify your carrier board) | One end: DC plug for Jetson power jack. Other end: bare wire to DC-DC converter output. Accepts 9–20V. |
 | 10 | Joystick | PS3 / PS4 | USB or Bluetooth |
 | 11 | Display | M5Stack Core2 | Optional, USB serial to Jetson |
+| 12 | IMU | BNO085 breakout board | I2C, on a separate bus from the PCA9685 |
 
 > **Mounting:** All parts except the PCA9685 are mounted using 3D-printed brackets.
 > CAD data (STL / STEP / Fusion 360 source) are available in [hardware/base_plate/](../hardware/base_plate/).
@@ -118,6 +119,30 @@ The ESC provides a 5V BEC output through the servo signal connector, which power
 
 ---
 
+## Step 5 — Install and Wire the BNO085 IMU
+
+Use a **separate I2C bus** from the PCA9685. If the BNO085 (which uses clock stretching) hangs its bus, throttle/steering output keeps working.
+
+**I2C connection (Jetson → BNO085):**
+
+| BNO085 pin | Jetson 40-pin header |
+|------------|----------------------|
+| VIN | Pin 1 (3.3V) |
+| GND | Pin 6 or 9 |
+| SDA | Pin 27 (I2C0 SDA, usually `/dev/i2c-1`) |
+| SCL | Pin 28 (I2C0 SCL) |
+| P0 / P1 | Leave open (I2C mode) |
+| DI | Open → 0x4A (default), High → 0x4B |
+
+The bus number depends on the carrier board. Check with `i2cdetect -l` and `i2cdetect -y -r 1` (0x4A should appear), then set `i2c_bus` in `src/sensors/bno085_imu/config/bno085_imu_params.yaml`.
+
+**Mounting:**
+- Near the chassis center of rotation, as low as possible, away from the motor and ESC.
+- Fix with foam double-sided tape to reduce vibration.
+- Align axes with `base_link` (REP-103: x forward, y left, z up). Set the offset/rotation via the `imu_*` launch arguments of `bno085_imu.launch.py`.
+
+---
+
 ## Full Wiring Overview
 
 ```
@@ -126,9 +151,10 @@ The ESC provides a 5V BEC output through the servo signal connector, which power
     └── DC-DC Boost (12V)
           ├── UST-10LX ──(Ethernet)──► Jetson Orin NX
           └── Jetson Orin NX (DC barrel jack)
-                ├── (I2C) ──► PCA9685
+                ├── (I2C, pin 3/5) ──► PCA9685
                 │                ├── CH0 ──► ESC signal (throttle)
                 │                └── CH1 ──► Servo signal (steering)
+                ├── (I2C, pin 27/28) ──► BNO085 IMU
                 ├── (USB/BT) ──► PS3/PS4 Joystick
                 └── (USB serial) ──► M5Stack Core2 (optional)
 ```
@@ -164,6 +190,7 @@ MAGPは、1/10スケールのミニカーサイズながら研究用途として
 | 9 | DCプラグ付きピグテールケーブル | DC 5.5mm × 2.5mm（キャリアボードで要確認） | 片側：JetsonのDC電源ジャック用プラグ（9〜20V 入力）。もう片側：DC-DCコンバータ出力端子に接続する裸線。 |
 | 10 | ジョイスティック | PS3 / PS4 | USBまたはBluetooth |
 | 11 | ディスプレイ | M5Stack Core2 | オプション、JetsonにUSBシリアル接続 |
+| 12 | IMU | BNO085ブレークアウトボード | I2C、PCA9685とは別バスに接続 |
 
 > **固定方法：** PCA9685以外の各部品は3Dプリンターで印刷したブラケットで固定します。
 > CADデータ（STL / STEP / Fusion 360 ソース）は [hardware/base_plate/](../hardware/base_plate/) にあります。
@@ -252,6 +279,30 @@ ESCのBEC出力（サーボコネクタ経由の5V）がPCA9685のサーボレ�
 
 ---
 
+## ステップ 5 — IMU（BNO085）の取り付けと配線
+
+PCA9685 とは**別の I2C バス**に接続します。BNO085（クロックストレッチを使う）がバスを固めても、スロットル・ステアリング出力が止まらないようにするためです。
+
+**I2C接続（Jetson → BNO085）：**
+
+| BNO085ピン | Jetson 40ピンヘッダ |
+|------------|--------------------|
+| VIN | 1番ピン（3.3V） |
+| GND | 6番または9番ピン |
+| SDA | 27番ピン（I2C0 SDA、通常 `/dev/i2c-1`） |
+| SCL | 28番ピン（I2C0 SCL） |
+| P0 / P1 | オープン（I2Cモード） |
+| DI | オープン → 0x4A（デフォルト）、High → 0x4B |
+
+バス番号はキャリアボードで変わります。`i2cdetect -l` と `i2cdetect -y -r 1` で 0x4A が見えることを確認し、`src/sensors/bno085_imu/config/bno085_imu_params.yaml` の `i2c_bus` を合わせてください。
+
+**取り付け：**
+- シャーシの回転中心付近、できるだけ低い位置で、モーター・ESCから離す。
+- 振動対策に両面スポンジテープで固定する。
+- 軸を `base_link`（REP-103：x 前、y 左、z 上）にそろえる。取り付け位置・回転は `bno085_imu.launch.py` の `imu_*` 引数で設定する。
+
+---
+
 ## 配線全体図
 
 ```
@@ -260,9 +311,10 @@ ESCのBEC出力（サーボコネクタ経由の5V）がPCA9685のサーボレ�
     └── DC-DC昇圧（12V）
           ├── UST-10LX ──(Ethernet)──► Jetson Orin NX
           └── Jetson Orin NX（DCプラグ）
-                ├── (I2C) ──► PCA9685
+                ├── (I2C、3/5番ピン) ──► PCA9685
                 │                ├── CH0 ──► ESC信号（スロットル）
                 │                └── CH1 ──► サーボ信号（ステアリング）
+                ├── (I2C、27/28番ピン) ──► BNO085 IMU
                 ├── (USB/BT) ──► PS3/PS4ジョイスティック
                 └── (USBシリアル) ──► M5Stack Core2（オプション）
 ```

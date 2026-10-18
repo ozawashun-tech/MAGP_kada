@@ -57,6 +57,7 @@
 | シングルボードコンピュータ | NVIDIA Jetson Orin NX |
 | SBCケース | 対応ケース（例：[Amazon](https://amzn.asia/d/0bSVL3AZ)、他でも可） |
 | PWMドライバー | PCA9685ブレークアウトボード（I2C） |
+| IMU | BNO085ブレークアウトボード（I2C、PCA9685とは別バス） |
 | リポバッテリー | [7.4V 2S](https://amzn.asia/d/3W8HEnf) |
 | DC-DC昇圧コンバータ | [7.4V → 12V](https://amzn.asia/d/dPUERnJ) |
 | タミヤプラグ | [コネクタ](https://amzn.asia/d/3aU40sA) |
@@ -72,6 +73,7 @@ Jetson Orin NX + UST-10LXという組み合わせにより、1/10スケールの
 - Python 3.10+
 - PyTorch 2.x
 - `adafruit-circuitpython-pca9685`
+- `adafruit-circuitpython-bno08x`、`adafruit-extended-bus`（IMU）
 - `pyserial`（M5Stackビジュアライザー使用時）
 
 ## クイックスタート
@@ -148,6 +150,7 @@ make run
 | [pytorch_pwm_controller](src/pytorch_pwm_controller/) | `nn_pwm_controller_node` | PyTorch Transformer推論、PWMコマンドのパブリッシュ |
 | [mux_pwm](src/mux_pwm/) | `pwm_mux_node` | ジョイスティックブレンディング付き手動/自動PWMマルチプレクサ |
 | [pwm_controller](src/controller/pwm_controller/) | `pwm_pca9685_controller` | PCA9685 I2C ハードウェアPWMドライバー |
+| [bno085_imu](src/sensors/bno085_imu/) | `bno085_imu_node` | BNO085 IMUドライバー（I2C）、`/imu/data` を配信 |
 | [bag_recorder](src/tools/bag_recorder/) | `bag_recorder_node` | ジョイスティック操作のrosbagレコーダー |
 | [m5stack_visualizer](src/tools/m5stack_visualizer/) | `m5stack_bridge_node` | M5Stack Core2ディスプレイへのシリアルブリッジ |
 | [urg_node2](src/urg_node2/) | `urg_node2` | 北陽電機 2D LiDARドライバー（Hokuyo / eSOL製） |

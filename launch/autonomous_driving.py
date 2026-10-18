@@ -27,6 +27,12 @@ def generate_launch_description():
             output='screen'
         ),
         
+        # bno085_imuを起動（base_link -> imu_link の静的TFも含む）
+        ExecuteProcess(
+            cmd=['ros2', 'launch', 'bno085_imu', 'bno085_imu.launch.py'],
+            output='screen'
+        ),
+
         # joy_mux_nodeを起動
         Node(
             package='mux_pwm',
