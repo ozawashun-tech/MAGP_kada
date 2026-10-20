@@ -45,6 +45,7 @@ ROS 2 の ament_python パッケージ群（`src/` 以下）。`urg_node2` だ�
 ### 学習と推論の対応
 
 - 学習データ: rosbag の `/scan`（入力）と `/pwm_input`（教師）を時刻で同期させる（[training_src/dataset.py](training_src/dataset.py)）。教師は「ジョイスティックの値」ではなく「実際にハードウェアに出した PWM」になる。
+- `pwm_mux_node` は `/mux_pwm` を出すたびに出どころ（`manual` / `auto` / `auto_l2`）を `/mux_pwm/source` に出し、bag に記録される。`dataset.py` はこれを `/pwm_input` の各行に付け、`DataPreprocessConfig(source_weights=...)` でラベルごとの重みを決める（0 は除外、ラベルの無い bag は全部 1.0）。`train.py` は重みが混ざると `WeightedRandomSampler` を使う。
 - `train.py` は `jetson_sync.fetch_latest_bags()` を使い、SSH（`MAGP_JETSON_HOST`、既定 `jetson`）で Jetson の `~/rosbag` から最新の bag を `dataset/train/` に取ってくる。接続できなければローカルの最新 bag を使う。
 - 保存される `.pth` は dict で、`model_state_dict` に加えて正規化統計（`scan_mean` / `scan_std` / `target_mean` / `target_std`）を含む。推論側はこれを使って正規化と逆正規化をする。
 - **モデル定義は 2 か所にある**: [training_src/model.py](training_src/model.py) と [src/pytorch_pwm_controller/pytorch_pwm_controller/model/model.py](src/pytorch_pwm_controller/pytorch_pwm_controller/model/model.py)。中身は同じ（後者には末尾にコメントアウトされたテストがあるだけ）。片方を変えたら、もう片方も必ず合わせる。
@@ -61,5 +62,5 @@ ROS 2 の ament_python パッケージ群（`src/` 以下）。`urg_node2` だ�
 ### その他
 
 - `launch/autonomous_driving.py` は各パッケージの launch を `ExecuteProcess` で呼び出し、主要ノードは `Node` で直接起動する。チューニング用のパラメータ（`speed_sensitivity` など）はここで上書きする。
-- マッピング: `launch/cartographer.launch.py` と `config/magp_2d.lua`。保存したマップは `data/map/` に置く。
+- マッピング: `script/mapping.sh` が `urg_node2` の `urg_cartographer.launch.py` を起動する。設定は `src/urg_node2/config/magp_2d.lua`（ルートの `config/magp_2d.lua` はそのコピーで、どこからも参照されていない）。`launch/cartographer.launch.py` は RPLIDAR 用（`sllidar_ros2`）の名残で、`sllidar_ros2` が無いため動かない。保存したマップは `data/map/` に置く。
 - 実機で確認が必要な作業は、[WIP.md](WIP.md) に日付付きで「変更内容 / 確認状況 / TODO」の形で残す運用になっている。
