@@ -4,6 +4,31 @@
 
 ---
 
+## 2026-10-28 — Auto に切り替えたら推論の履歴を埋め直す（branch: `reset-history-on-auto`）
+
+### 目的
+推論ノードは手動中も `/scan` を溜め続けるため、手動中に車を手で運んでから Auto にすると、運んでいる最中のスキャンが約 4.75 秒間（191 フレーム）入力に残っていた。
+
+### 変更内容
+- `src/pytorch_pwm_controller/pytorch_pwm_controller/nn_pwm_controller_node.py`:
+  - `/mux_pwm/status`（パラメータ `mode_topic`）を購読し、Manual → Auto に変わったら、次に届いたスキャン 1 枚で履歴 191 フレームをすべて埋める。学習で bag の先頭の足りない履歴を最初のフレームで埋めているのと同じ形。
+  - Auto → Manual では何もしない。Auto のまま status が届いてもリセットしない。
+  - `reset_history_on_auto`（既定 `True`）を `False` にすると従来の動作に戻る。
+  - 起動直後で履歴が溜まる前に Auto にした場合も、その時点から推論を始める（従来は約 4.75 秒待っていた）。
+- `nn_imu_pwm_controller_node.py`（IMU 版）は変更していない。
+
+### 確認状況
+- [x] rclpy をスタブにして、モードの切り替えと履歴の中身を確認した（Manual → Auto でリセット、Auto → Auto ではリセットしない、無効化、起動直後の Auto）。
+- [ ] 実機での確認（下の TODO）
+
+### TODO（実機）
+1. `make build` → `make run` で起動し、ログに `Reset history on Auto: True (/mux_pwm/status)` が出ることを確認する。
+2. PS ボタンで Auto にするたびに `Switched to Auto: scan history reset to the latest scan` が出ることを確認する。
+3. 車を手で運んで置き、すぐ Auto にして、再開直後の挙動が落ち着いているかを見る。比べるなら `reset_history_on_auto: False` でも試す。
+4. 切り替えた瞬間の 1〜2 フレーム（数十 ms）は、`pwm_mux_node` が切り替え前の `/torch_pwm` を使う。問題になるようなら `pwm_mux_node` 側で Auto 切り替え時に `latest_torch_pwm` を捨てる。
+
+---
+
 ## 2026-10-19 — L2 補正区間を学習で重く扱う（branch: `l2-intervention-weighting`）
 
 ### 目的

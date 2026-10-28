@@ -49,7 +49,7 @@ ROS 2 の ament_python パッケージ群（`src/` 以下）。`urg_node2` だ�
 - `train.py` は `jetson_sync.fetch_latest_bags()` を使い、SSH（`MAGP_JETSON_HOST`、既定 `jetson`）で Jetson の `~/rosbag` から最新の bag を `dataset/train/` に取ってくる。接続できなければローカルの最新 bag を使う。
 - 保存される `.pth` は dict で、`model_state_dict` に加えて正規化統計（`scan_mean` / `scan_std` / `target_mean` / `target_std`）を含む。推論側はこれを使って正規化と逆正規化をする。
 - **モデル定義は 2 か所にある**: [training_src/model.py](training_src/model.py) と [src/pytorch_pwm_controller/pytorch_pwm_controller/model/model.py](src/pytorch_pwm_controller/pytorch_pwm_controller/model/model.py)。中身は同じ（後者には末尾にコメントアウトされたテストがあるだけ）。片方を変えたら、もう片方も必ず合わせる。
-- `scan_history_length` / `scan_history_stride` は、学習時の値と [launch/autonomous_driving.py](launch/autonomous_driving.py) の推論ノードのパラメータで一致させる。推論ノードは `(length-1)*stride+1` フレームをバッファし、stride ごとに取り出してモデルに入れる。
+- `scan_history_length` / `scan_history_stride` は、学習時の値と [launch/autonomous_driving.py](launch/autonomous_driving.py) の推論ノードのパラメータで一致させる。推論ノードは `(length-1)*stride+1` フレームをバッファし、stride ごとに取り出してモデルに入れる。バッファは手動中も更新され続けるが、`/mux_pwm/status` で Manual → Auto に変わると、次のスキャン 1 枚で埋め直す（`reset_history_on_auto`）。
 - 推論で使うモデルは launch の `model_path`（現状 `/home/jetson/models/my_model.pth`）で指定する。空ならパッケージ同梱の `model_v9.pth` を使う。過去モデルの設定と評価は [model.md](src/pytorch_pwm_controller/pytorch_pwm_controller/model/model.md) に記録している。
 
 ### 現行モデルの保護と IMU 実験（進行中）

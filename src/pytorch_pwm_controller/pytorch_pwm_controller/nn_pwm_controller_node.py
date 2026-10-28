@@ -3,7 +3,9 @@ import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import LaserScan
 from geometry_msgs.msg import TwistStamped
+from std_msgs.msg import String
 import numpy as np
+import json
 from ament_index_python.packages import get_package_share_directory
 import os
 import time
@@ -17,6 +19,9 @@ class NNControllerNode(Node):
         
         # scan_rangesのシーケンスを保持するリスト
         self.scan_sequence = []
+        # Auto に切り替わったら、次のスキャンで履歴を埋め直す
+        self.auto_mode = False
+        self.reset_history = False
         
         # パラメータの宣言
         self.declare_parameter('model_path', '')
@@ -25,12 +30,15 @@ class NNControllerNode(Node):
         self.declare_parameter('prediction_steps', 1)
         self.declare_parameter('scan_history_length', 20)
         self.declare_parameter('scan_history_stride', 10)
+        self.declare_parameter('mode_topic', '/mux_pwm/status')
+        self.declare_parameter('reset_history_on_auto', True)
         
         # パラメータの取得
         model_path = self.get_parameter('model_path').get_parameter_value().string_value
         prediction_steps = self.get_parameter('prediction_steps').get_parameter_value().integer_value
         self.scan_history_length = self.get_parameter('scan_history_length').get_parameter_value().integer_value
         self.scan_history_stride = self.get_parameter('scan_history_stride').get_parameter_value().integer_value
+        self.reset_history_on_auto = self.get_parameter('reset_history_on_auto').get_parameter_value().bool_value
         
         # モデルパスが指定されていない場合はデフォルトパスを使用
         if not model_path:
@@ -39,6 +47,7 @@ class NNControllerNode(Node):
         
         scan_topic = self.get_parameter('scan_topic').get_parameter_value().string_value
         pwm_topic = self.get_parameter('pwm_topic').get_parameter_value().string_value
+        mode_topic = self.get_parameter('mode_topic').get_parameter_value().string_value
         
         self.get_logger().info(f'Loading model from: {model_path}')
         self.get_logger().info(f'Prediction steps: {prediction_steps}')
@@ -63,12 +72,32 @@ class NNControllerNode(Node):
             self.scan_callback,
             10
         )
+        # 手動中に車を運ぶと、そのスキャンが Auto 再開後も約 5 秒間履歴に残るため、モードの切り替えを見る
+        self.mode_sub = self.create_subscription(
+            String,
+            mode_topic,
+            self.mode_callback,
+            10
+        )
         
         # Publisher (TwistStamped for PWM commands)
         self.pwm_pub = self.create_publisher(TwistStamped, pwm_topic, 10)
         
         self.get_logger().info(f'Subscribing to: {scan_topic}')
         self.get_logger().info(f'Publishing to: {pwm_topic}')
+        self.get_logger().info(f'Reset history on Auto: {self.reset_history_on_auto} ({mode_topic})')
+    
+    def mode_callback(self, msg: String):
+        """pwm_mux_node のモード（{"mode": "Auto" | "Manual", ...}）を受け取る"""
+        try:
+            auto_mode = json.loads(msg.data).get('mode') == 'Auto'
+        except (json.JSONDecodeError, AttributeError):
+            self.get_logger().warn(f'Unknown mode message: {msg.data}')
+            return
+        
+        if auto_mode and not self.auto_mode and self.reset_history_on_auto:
+            self.reset_history = True
+        self.auto_mode = auto_mode
     
     def scan_callback(self, msg: LaserScan):
         try:
@@ -84,6 +113,13 @@ class NNControllerNode(Node):
             
             # 必要なデータ数を計算（strideを考慮）
             required_length = (self.scan_history_length - 1) * self.scan_history_stride + 1
+            
+            # Auto に切り替わった直後: 手動中のスキャンを捨て、最新のスキャン 1 枚で履歴を埋める
+            # （学習でも bag の先頭は、足りない履歴を最初のフレームで埋めている）
+            if self.reset_history:
+                self.reset_history = False
+                self.scan_sequence = [scan_ranges] * required_length
+                self.get_logger().info('Switched to Auto: scan history reset to the latest scan')
             
             # 必要な数が溜まるまで待つ
             if len(self.scan_sequence) < required_length:
