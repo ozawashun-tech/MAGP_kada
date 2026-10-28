@@ -1,3 +1,4 @@
+import copy
 import numpy as np
 import torch
 import torch.nn as nn
@@ -391,7 +392,7 @@ def train_model(
             # 検証lossが改善した
             best_val_loss = avg_val_loss
             patience_counter = 0
-            best_model_state = model.state_dict().copy()
+            best_model_state = copy.deepcopy(model.state_dict())
             # ベストモデルも保存
             save_checkpoint(epoch + 1, is_best=True)
         else:
