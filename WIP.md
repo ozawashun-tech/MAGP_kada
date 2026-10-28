@@ -4,6 +4,41 @@
 
 ---
 
+## 2026-10-28 — Auto に切り替えたら推論の履歴を埋め直す（branch: `reset-history-on-auto-v2`）
+
+### 目的
+スタート地点から走らせるとうまく走るが、途中で止めて少し手前から再開させるとうまく走れない。推論ノードは手動中も `/scan` を溜め続けるため、手動中に車を手で運んでから Auto にすると、運んでいる最中のスキャンが約 4.9 秒間（191 フレーム）入力に残っていた。
+
+オフラインで確かめたこと（`my_model.pth`、bag `14_57_36_2`）:
+- 各地点で「その地点のスキャン 1 枚を繰り返した履歴」（＝その場で止めて再開した直後）を入れると、ステアリングの誤差が 23 µs → 142 µs、記録された操作との相関が 0.97 → 0.37 に悪化した。
+- 学習で静止した履歴が出てくるのは bag の先頭（スタート地点）だけなので、コース途中の静止履歴は学習データにない入力になる。
+
+この変更（履歴のリセット）は、運んでいる最中のスキャンを捨てて、推論の入力を「bag の先頭と同じ形」にそろえるもの。これだけでは「コース途中での静止履歴」は学習データにないままなので、学習側で再開を模した履歴を混ぜる拡張（オフラインで再開直後の誤差が 103 → 71 µs に改善）と組み合わせる予定。
+
+### 変更内容
+- `src/pytorch_pwm_controller/pytorch_pwm_controller/nn_pwm_controller_node.py`:
+  - `/mux_pwm/status`（パラメータ `mode_topic`）を購読し、Manual → Auto に変わったら、次に届いたスキャン 1 枚で履歴 191 フレームをすべて埋める。学習で bag の先頭の足りない履歴を最初のフレームで埋めているのと同じ形。
+  - Auto → Manual では何もしない。Auto のまま status が届いてもリセットしない。
+  - `reset_history_on_auto`（既定 `True`）を `False` にすると従来の動作に戻る。
+  - 起動直後で履歴が溜まる前に Auto にした場合も、その時点から推論を始める（従来は約 4.9 秒待っていた）。
+  - `Ready for inference` のログは最初の 1 回だけ出す（リセットのたびに出ていたため）。
+- `nn_imu_pwm_controller_node.py`（IMU 版）は変更していない。
+- 10/28 に一度 main へマージして打ち消した `reset-history-on-auto`（b0f80c4）と同じ内容。
+
+### 確認状況
+- [x] rclpy をスタブにした動作確認: Manual → Auto でリセット、Auto → Auto ではリセットしない、Auto → Manual → Auto で再リセット、`reset_history_on_auto: False` で従来どおり、起動直後の Auto でもすぐ推論、不正な status は警告のみ。
+- [x] `colcon build --packages-select pytorch_pwm_controller` が通った。
+- [x] PC で bag（`14_57_36_2`）の `/scan` を再生し、`ros2 topic pub` で `/mux_pwm/status` を送って確認した（車は動かしていない、`ROS_DOMAIN_ID=77`）。Auto を送るとリセットのログが出て、Auto を続けて送ったときは出ず、Manual → Auto で再び出た。
+- [ ] 実機での確認（下の TODO）
+
+### TODO（実機）
+1. `make build` → `make run` で起動し、ログに `Reset history on Auto: True (/mux_pwm/status)` が出ることを確認する。
+2. PS ボタンで Auto にするたびに `Switched to Auto: scan history reset to the latest scan` が出ることを確認する。
+3. 途中で止め、少し手前に車を手で運んで置き、すぐ Auto にして、再開直後の挙動を見る。比べるなら `reset_history_on_auto: False` でも試す。
+4. 切り替えた瞬間の 1〜2 フレーム（数十 ms）は、`pwm_mux_node` が切り替え前の `/torch_pwm` を使う。問題になるようなら `pwm_mux_node` 側で Auto 切り替え時に `latest_torch_pwm` を捨てる。
+
+---
+
 ## 2026-10-18 — IMU（ヨーレート）モデルの実機走行
 
 ### 目的
