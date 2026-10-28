@@ -8,7 +8,7 @@ from dataset import (
     custom_collate_fn,
     load_rosbags,
 )
-from jetson_sync import LOCAL_BAG_DIR, fetch_latest_bags
+from jetson_sync import fetch_latest_bags
 from model import DNN
 from torch.utils.data import DataLoader, WeightedRandomSampler, random_split
 from datetime import datetime
@@ -429,23 +429,11 @@ def train_model(
 
 
 if __name__ == "__main__":
-    # 毎回の学習に必ず含める bag（dataset/train/ 以下の名前）
-    # 手動走行の bag と、これまでの補正走行（L2）の bag をここに積み重ねていく
+    # Jetson から取ってくる最新の bag の数（今回の走行だけで学習する）
     # ラベル（/mux_pwm/source）の無い bag は全区間が手動走行（重み 1）として扱われる
-    BASE_BAGS = [
-        "rosbag2_2026_10_14-10_15_03_1",
-        "rosbag2_2026_10_14-12_07_42_1",
-        "rosbag2_2026_10_14-13_07_13_1",
-    ]
-    # Jetson から取ってきて足す最新の bag の数（今回の走行）
     LATEST_BAG_COUNT = 1
 
-    bag_paths = [LOCAL_BAG_DIR / name for name in BASE_BAGS]
-    missing = [p.name for p in bag_paths if not p.is_dir()]
-    if missing:
-        raise FileNotFoundError(f"{LOCAL_BAG_DIR} に {', '.join(missing)} がありません")
-    # Jetson に繋がらないときはローカルの最新を返すので、BASE_BAGS と重なる分は足さない
-    bag_paths += [p for p in fetch_latest_bags(LATEST_BAG_COUNT) if p.name not in BASE_BAGS]
+    bag_paths = fetch_latest_bags(LATEST_BAG_COUNT)
 
     print("\nBags used for training:")
     for path in bag_paths:

@@ -54,7 +54,8 @@
 2. `ros2 topic echo /mux_pwm/source` で、PS ボタンで `manual` ⇔ `auto` が、自動中に L2 を押している間は `auto_l2` が出ることを確認する。
 3. `ros2 topic hz /mux_pwm/source` が `/mux_pwm` と同じくらいであることを確認する。
 4. 自動走行＋L2 補正で bag を記録し、`metadata.yaml` に `/mux_pwm/source` があることを確認する。
-5. 手動走行の bag と補正走行の bag を混ぜて学習する。`train.py` は `BASE_BAGS`（毎回含める bag）と Jetson の最新 bag を合わせて学習し、`model/transformer/my_model_<日時>.pth` に保存する。補正走行の bag は、使い終わったら `BASE_BAGS` に足して積み重ねる。`model/checkpoints/` は毎回上書きされる。
+5. 補正走行の bag で学習する。`train.py` は Jetson の最新 bag（`LATEST_BAG_COUNT` 本）だけで学習し、`model/transformer/my_model_<日時>.pth` に保存する。`model/checkpoints/` は毎回上書きされる。
+   - 2026-10-28: 以前は `BASE_BAGS`（10/14 午前の 3 本）を毎回混ぜていたが、削除した。この 3 本はコースを逆回り（右旋回が中心）で走っており、今の向き（左旋回が中心）の bag の 4 倍近いサンプル数があったため。
 
 ---
 
