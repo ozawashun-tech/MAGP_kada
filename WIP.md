@@ -4,7 +4,7 @@
 
 ---
 
-## 2026-10-28 — Auto に切り替えたら推論の履歴を埋め直す（branch: `reset-history-on-auto-v2`）
+## 2026-10-28 — Auto に切り替えたら推論の履歴を埋め直す（branch: `reset-history-on-auto-v2`、main にマージ済み）
 
 ### 目的
 スタート地点から走らせるとうまく走るが、途中で止めて少し手前から再開させるとうまく走れない。推論ノードは手動中も `/scan` を溜め続けるため、手動中に車を手で運んでから Auto にすると、運んでいる最中のスキャンが約 4.9 秒間（191 フレーム）入力に残っていた。
@@ -29,7 +29,7 @@
 - [x] rclpy をスタブにした動作確認: Manual → Auto でリセット、Auto → Auto ではリセットしない、Auto → Manual → Auto で再リセット、`reset_history_on_auto: False` で従来どおり、起動直後の Auto でもすぐ推論、不正な status は警告のみ。
 - [x] `colcon build --packages-select pytorch_pwm_controller` が通った。
 - [x] PC で bag（`14_57_36_2`）の `/scan` を再生し、`ros2 topic pub` で `/mux_pwm/status` を送って確認した（車は動かしていない、`ROS_DOMAIN_ID=77`）。Auto を送るとリセットのログが出て、Auto を続けて送ったときは出ず、Manual → Auto で再び出た。
-- [ ] 実機での確認（下の TODO）
+- [x] 実機での確認: うまく行った（2026-10-28）
 
 ### TODO（実機）
 1. `make build` → `make run` で起動し、ログに `Reset history on Auto: True (/mux_pwm/status)` が出ることを確認する。
