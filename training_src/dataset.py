@@ -17,7 +17,6 @@ class DataPreprocessConfig:
         stop_samples=None,
         stop_margin_before=0,
         stop_margin_after=0,
-        source_weights=None,
     ):
         """
         Args:
@@ -30,10 +29,6 @@ class DataPreprocessConfig:
                 両方指定された場合のみ連続停止区間を削除
             stop_margin_before: 停止区間の前に削除するサンプル数
             stop_margin_after: 停止区間の後に削除するサンプル数
-            source_weights: /mux_pwm/source のラベルごとのサンプルの重み
-                例: {"manual": 1.0, "auto": 0.0, "auto_l2": 3.0}
-                0 のラベルは学習から除外する。辞書にないラベルとラベルの無い bag は 1.0
-                None なら全サンプル 1.0
         """
         if trim_front < 0 or trim_back < 0 or trim_front + trim_back >= 1.0:
             raise ValueError("trim_front and trim_back must be in [0, 1)")
@@ -44,29 +39,6 @@ class DataPreprocessConfig:
         self.stop_samples = stop_samples
         self.stop_margin_before = stop_margin_before
         self.stop_margin_after = stop_margin_after
-        self.source_weights = source_weights
-
-
-SOURCE_TOPIC = "/mux_pwm/source"
-
-
-def attach_source(joy_df, source_df):
-    """
-    /pwm_input の各行に、その時刻以前で最後に届いた /mux_pwm/source のラベルを source 列として付ける
-
-    最初のラベルより前の行は "unknown" にする。
-    """
-    if len(joy_df) == 0 or len(source_df) == 0:
-        return joy_df
-
-    source_df = source_df.sort_values("timestamp").reset_index(drop=True)
-    source_t = source_df["timestamp"].to_numpy(np.int64)
-    labels = source_df["source"].to_numpy(object)
-
-    idx = np.searchsorted(source_t, joy_df["timestamp"].to_numpy(np.int64), side="right") - 1
-    joy_df = joy_df.copy()
-    joy_df["source"] = np.where(idx >= 0, labels[np.maximum(idx, 0)], "unknown")
-    return joy_df
 
 
 def load_rosbag_data(bag_path):
@@ -74,7 +46,6 @@ def load_rosbag_data(bag_path):
     typestore = get_typestore(Stores.LATEST)
     joy_data = []
     scan_data = []
-    source_data = []
 
     # Reader は metadata.yaml のある bag ディレクトリを要求する
     bag_path = Path(bag_path)
@@ -95,11 +66,8 @@ def load_rosbag_data(bag_path):
                 data = vars(msg)
                 data["timestamp"] = timestamp
                 scan_data.append(data)
-            elif connection.topic == SOURCE_TOPIC:
-                source_data.append({"source": msg.data, "timestamp": timestamp})
 
-    joy_df = attach_source(pd.DataFrame(joy_data), pd.DataFrame(source_data))
-    return pd.DataFrame(scan_data), joy_df
+    return pd.DataFrame(scan_data), pd.DataFrame(joy_data)
 
 
 def synchronize_data(scan_df, joy_df):
@@ -206,29 +174,6 @@ def filter_stops(
     return scan_df, joy_df
 
 
-def assign_sample_weights(joy_df, source_weights):
-    """source 列のラベルから sample_weight 列を作る（ラベルが無ければ全行 1.0）"""
-    joy_df = joy_df.copy()
-    if source_weights is None:
-        joy_df["sample_weight"] = 1.0
-        return joy_df
-
-    if "source" not in joy_df.columns:
-        print(f"  Warning: {SOURCE_TOPIC} がないため、全サンプルの重みを 1.0 にします")
-        joy_df["sample_weight"] = 1.0
-        return joy_df
-
-    joy_df["sample_weight"] = (
-        joy_df["source"].map(source_weights).fillna(1.0).astype(np.float32)
-    )
-    counts = joy_df["source"].value_counts()
-    summary = ", ".join(
-        f"{label}: {count} (x{source_weights.get(label, 1.0)})" for label, count in counts.items()
-    )
-    print(f"  Source weights: {summary}")
-    return joy_df
-
-
 def preprocess_data(scan_df, joy_df, config=None):
     """
     データの前処理を実行
@@ -259,9 +204,6 @@ def preprocess_data(scan_df, joy_df, config=None):
         config.stop_margin_before,
         config.stop_margin_after,
     )
-
-    # ラベルごとの重み
-    joy_df = assign_sample_weights(joy_df, config.source_weights)
 
     return scan_df, joy_df
 
@@ -371,18 +313,12 @@ class RosbagDataset(torch.utils.data.Dataset):
             [joy_df.iloc[i]["twist.linear.x"], joy_df.iloc[i]["twist.angular.z"]]
             for i in range(len(joy_df))
         ], dtype=np.float32)
-        if "sample_weight" in joy_df.columns:
-            row_weights = joy_df["sample_weight"].to_numpy(np.float32)
-        else:
-            row_weights = np.ones(len(joy_df), dtype=np.float32)
-
+        
         # スキャンは1回だけ保持し、各サンプルは履歴のインデックスだけを持つ
         # （履歴を丸ごとコピーすると全サンプルで数十GBになるため）
         self.all_scans = all_scans.astype(np.float32)
         self.history_indices = []
         self.targets = []
-        self.sample_weights = []
-        excluded = 0
         
         for idx in range(len(scan_df)):
             # このidxがどのファイルに属するか確認
@@ -405,13 +341,7 @@ class RosbagDataset(torch.utils.data.Dataset):
             # ← 修正: ファイル境界を考慮
             if idx + prediction_steps >= file_end:
                 continue
-
-            # 重みは教師の行で決める（モデル自身の出力が教師になる行を含むサンプルは除外）
-            weight = row_weights[idx + 1 : idx + prediction_steps + 1].min()
-            if weight <= 0:
-                excluded += 1
-                continue
-
+            
             # 履歴を取得
             scan_indices = []
             for i in range(scan_history_length):
@@ -444,19 +374,12 @@ class RosbagDataset(torch.utils.data.Dataset):
             
             self.history_indices.append(scan_indices)
             self.targets.append(targets)
-            self.sample_weights.append(weight)
-
+        
         # リストからnumpy配列に変換
         self.history_indices = np.array(self.history_indices, dtype=np.int64)
         self.targets = np.array(self.targets, dtype=np.float32)
-        self.sample_weights = np.array(self.sample_weights, dtype=np.float32)
-
+        
         print(f"  Created {len(self.history_indices)} samples")
-        if excluded > 0:
-            print(f"  Excluded {excluded} samples with weight 0")
-        if len(self.sample_weights) > 0 and not np.all(self.sample_weights == 1.0):
-            values, counts = np.unique(self.sample_weights, return_counts=True)
-            print(f"  Sample weights: {dict(zip(values.tolist(), counts.tolist()))}")
         print(f"  Scan histories shape: {self.history_indices.shape + self.all_scans.shape[1:]}")
         print(f"  Targets shape: {self.targets.shape}")
 

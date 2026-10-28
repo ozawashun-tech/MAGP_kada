@@ -71,9 +71,7 @@ class PwmMuxNode(Node):
         self.status_pub = self.create_publisher(String, '/mux_pwm/status', 10)
         self.manual_gain_pub = self.create_publisher(Float32, '/mux_pwm/manual_gain', 10)
         self.torch_gain_pub = self.create_publisher(Float32, '/mux_pwm/torch_gain', 10)
-        # /mux_pwm の出どころ（manual / auto / auto_l2）。学習で補正区間を見分けるために bag に記録する
-        self.source_pub = self.create_publisher(String, '/mux_pwm/source', 10)
-
+        
         # State variables
         self.manual_mode = True
         self.last_ps_button_state = 0
@@ -288,7 +286,6 @@ class PwmMuxNode(Node):
                 output_msg.twist.linear.x = self.convert_joy_to_motor_pwm(self.latest_joy.axes[1])
                 output_msg.twist.angular.z = self.convert_joy_to_steering_pwm(self.latest_joy.axes[2])
                 self.mux_pwm_pub.publish(output_msg)
-                self.publish_source('manual')
         else:
             # 自動モード
             if self.latest_torch_pwm is not None:
@@ -305,8 +302,7 @@ class PwmMuxNode(Node):
                     output_msg = self.apply_torch_gain(self.latest_torch_pwm)
                 
                 self.mux_pwm_pub.publish(output_msg)
-                self.publish_source('auto_l2' if l2_pressed else 'auto')
-
+        
         # ステータスをパブリッシュ
         # self.publish_status()
     
@@ -326,12 +322,6 @@ class PwmMuxNode(Node):
         status_msg.data = json.dumps(status_dict)
         self.status_pub.publish(status_msg)
     
-    def publish_source(self, source):
-        """直前に出した /mux_pwm の出どころをパブリッシュ"""
-        source_msg = String()
-        source_msg.data = source
-        self.source_pub.publish(source_msg)
-
     def publish_manual_gain(self):
         """現在の手動ゲイン値をパブリッシュ"""
         gain_msg = Float32()

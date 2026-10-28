@@ -45,11 +45,10 @@ ROS 2 の ament_python パッケージ群（`src/` 以下）。`urg_node2` だ�
 ### 学習と推論の対応
 
 - 学習データ: rosbag の `/scan`（入力）と `/pwm_input`（教師）を時刻で同期させる（[training_src/dataset.py](training_src/dataset.py)）。教師は「ジョイスティックの値」ではなく「実際にハードウェアに出した PWM」になる。
-- `pwm_mux_node` は `/mux_pwm` を出すたびに出どころ（`manual` / `auto` / `auto_l2`）を `/mux_pwm/source` に出し、bag に記録される。`dataset.py` はこれを `/pwm_input` の各行に付け、`DataPreprocessConfig(source_weights=...)` でラベルごとの重みを決める（0 は除外、ラベルの無い bag は全部 1.0）。`train.py` は重みが混ざると `WeightedRandomSampler` を使う。
 - `train.py` は `jetson_sync.fetch_latest_bags()` を使い、SSH（`MAGP_JETSON_HOST`、既定 `jetson`）で Jetson の `~/rosbag` から最新の bag を `dataset/train/` に取ってくる。接続できなければローカルの最新 bag を使う。
 - 保存される `.pth` は dict で、`model_state_dict` に加えて正規化統計（`scan_mean` / `scan_std` / `target_mean` / `target_std`）を含む。推論側はこれを使って正規化と逆正規化をする。
 - **モデル定義は 2 か所にある**: [training_src/model.py](training_src/model.py) と [src/pytorch_pwm_controller/pytorch_pwm_controller/model/model.py](src/pytorch_pwm_controller/pytorch_pwm_controller/model/model.py)。中身は同じ（後者には末尾にコメントアウトされたテストがあるだけ）。片方を変えたら、もう片方も必ず合わせる。
-- `scan_history_length` / `scan_history_stride` は、学習時の値と [launch/autonomous_driving.py](launch/autonomous_driving.py) の推論ノードのパラメータで一致させる。推論ノードは `(length-1)*stride+1` フレームをバッファし、stride ごとに取り出してモデルに入れる。バッファは手動中も更新され続けるが、`/mux_pwm/status` で Manual → Auto に変わると、次のスキャン 1 枚で埋め直す（`reset_history_on_auto`）。
+- `scan_history_length` / `scan_history_stride` は、学習時の値と [launch/autonomous_driving.py](launch/autonomous_driving.py) の推論ノードのパラメータで一致させる。推論ノードは `(length-1)*stride+1` フレームをバッファし、stride ごとに取り出してモデルに入れる。
 - 推論で使うモデルは launch の `model_path`（現状 `/home/jetson/models/my_model.pth`）で指定する。空ならパッケージ同梱の `model_v9.pth` を使う。過去モデルの設定と評価は [model.md](src/pytorch_pwm_controller/pytorch_pwm_controller/model/model.md) に記録している。
 
 ### 現行モデルの保護と IMU 実験（進行中）
@@ -62,5 +61,5 @@ ROS 2 の ament_python パッケージ群（`src/` 以下）。`urg_node2` だ�
 ### その他
 
 - `launch/autonomous_driving.py` は各パッケージの launch を `ExecuteProcess` で呼び出し、主要ノードは `Node` で直接起動する。チューニング用のパラメータ（`speed_sensitivity` など）はここで上書きする。
-- マッピング: `script/mapping.sh` が `urg_node2` の `urg_cartographer.launch.py` を起動する。設定は `src/urg_node2/config/magp_2d.lua`（ルートの `config/magp_2d.lua` はそのコピーで、どこからも参照されていない）。`launch/cartographer.launch.py` は RPLIDAR 用（`sllidar_ros2`）の名残で、`sllidar_ros2` が無いため動かない。保存したマップは `data/map/` に置く。
+- マッピング: `launch/cartographer.launch.py` と `config/magp_2d.lua`。保存したマップは `data/map/` に置く。
 - 実機で確認が必要な作業は、[WIP.md](WIP.md) に日付付きで「変更内容 / 確認状況 / TODO」の形で残す運用になっている。
