@@ -21,3 +21,7 @@ __pycache__/
 
 # VSCode settings
 .vscode
+
+# Docker (手元 PC 専用の開発環境)
+docker/
+.dockerignore

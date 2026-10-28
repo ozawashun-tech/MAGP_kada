@@ -1,3 +1,4 @@
+import copy
 import numpy as np
 import torch
 import torch.nn as nn
@@ -7,9 +8,10 @@ from dataset import (
     custom_collate_fn,
     load_rosbags,
 )
-from jetson_sync import fetch_latest_bags
+from jetson_sync import LOCAL_BAG_DIR, fetch_latest_bags
 from model import DNN
-from torch.utils.data import DataLoader, random_split
+from torch.utils.data import DataLoader, WeightedRandomSampler, random_split
+from datetime import datetime
 import os
 
 
@@ -93,6 +95,7 @@ def train_model(
     early_stopping_min_delta=1e-6,
     use_normalization=True,
     checkpoint_interval=10,  # 追加: チェックポイント保存間隔
+    source_weights=None,
 ):
     """
     モデルの学習を実行（正規化機能付き）
@@ -113,6 +116,7 @@ def train_model(
         early_stopping_min_delta: 改善と判定する最小のloss減少量
         use_normalization: データ正規化を使用するかどうか
         checkpoint_interval: チェックポイント保存間隔（エポック数）
+        source_weights: /mux_pwm/source のラベルごとのサンプルの重み（DataPreprocessConfig を参照）
     """
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
@@ -131,6 +135,7 @@ def train_model(
         stop_samples=10000,
         stop_margin_before=20,
         stop_margin_after=20,
+        source_weights=source_weights,
     )
     scan_df, joy_df, file_boundaries = load_rosbags(bag_paths, preprocess_configs=config)
 
@@ -182,9 +187,22 @@ def train_model(
     print(f"  Validation samples: {val_size}")
 
     # DataLoaderの作成
-    train_loader = DataLoader(
-        train_dataset, batch_size=batch_size, shuffle=True, collate_fn=custom_collate_fn
-    )
+    # 重みが混ざるときは、重みに比例した頻度でサンプルを選ぶ（補正区間を重く扱う）
+    train_weights = dataset.sample_weights[train_dataset.indices]
+    if len(train_weights) > 0 and not np.all(train_weights == train_weights[0]):
+        sampler = WeightedRandomSampler(
+            torch.as_tensor(train_weights, dtype=torch.double),
+            num_samples=len(train_weights),
+            replacement=True,
+        )
+        print("  Using weighted sampling for training")
+        train_loader = DataLoader(
+            train_dataset, batch_size=batch_size, sampler=sampler, collate_fn=custom_collate_fn
+        )
+    else:
+        train_loader = DataLoader(
+            train_dataset, batch_size=batch_size, shuffle=True, collate_fn=custom_collate_fn
+        )
     val_loader = DataLoader(
         val_dataset, batch_size=batch_size, shuffle=False, collate_fn=custom_collate_fn
     )
@@ -374,7 +392,7 @@ def train_model(
             # 検証lossが改善した
             best_val_loss = avg_val_loss
             patience_counter = 0
-            best_model_state = model.state_dict().copy()
+            best_model_state = copy.deepcopy(model.state_dict())
             # ベストモデルも保存
             save_checkpoint(epoch + 1, is_best=True)
         else:
@@ -411,9 +429,32 @@ def train_model(
 
 
 if __name__ == "__main__":
+    # 毎回の学習に必ず含める bag（dataset/train/ 以下の名前）
+    # 手動走行の bag と、これまでの補正走行（L2）の bag をここに積み重ねていく
+    # ラベル（/mux_pwm/source）の無い bag は全区間が手動走行（重み 1）として扱われる
+    BASE_BAGS = [
+        "rosbag2_2026_10_14-10_15_03_1",
+        "rosbag2_2026_10_14-12_07_42_1",
+        "rosbag2_2026_10_14-13_07_13_1",
+    ]
+    # Jetson から取ってきて足す最新の bag の数（今回の走行）
+    LATEST_BAG_COUNT = 1
+
+    bag_paths = [LOCAL_BAG_DIR / name for name in BASE_BAGS]
+    missing = [p.name for p in bag_paths if not p.is_dir()]
+    if missing:
+        raise FileNotFoundError(f"{LOCAL_BAG_DIR} に {', '.join(missing)} がありません")
+    # Jetson に繋がらないときはローカルの最新を返すので、BASE_BAGS と重なる分は足さない
+    bag_paths += [p for p in fetch_latest_bags(LATEST_BAG_COUNT) if p.name not in BASE_BAGS]
+
+    print("\nBags used for training:")
+    for path in bag_paths:
+        print(f"  {path.name}")
+
     train_model(
-        bag_paths=fetch_latest_bags(),
-        model_save_path="../model/transformer/my_model.pth",
+        bag_paths=bag_paths,
+        # 既存のモデルを上書きしないよう、学習した日時をファイル名に入れる
+        model_save_path=f"../model/transformer/my_model_{datetime.now():%Y%m%d_%H%M%S}.pth",
         scan_history_length=20,
         scan_history_stride=10,
         prediction_steps=1,
@@ -424,4 +465,6 @@ if __name__ == "__main__":
         early_stopping_patience=10,
         use_normalization=True,
         checkpoint_interval=10,
+        # 自動で L2 を押していない区間（教師がモデル自身の出力）は除外し、L2 で補正した区間を重くする
+        source_weights={"manual": 1.0, "auto": 0.0, "auto_l2": 3.0},
     )

@@ -4,6 +4,35 @@
 
 ---
 
+## 2026-10-19 — L2 補正区間を学習で重く扱う（branch: `l2-intervention-weighting`）
+
+### 目的
+自動走行中に L2 で補正したデータで学習し直し、モデルが苦手な場面を直す（HG-DAgger に近いやり方）。今までの bag には L2 やモードの情報が無く、自動で L2 を押していない区間（教師がモデル自身の出力）も同じ重みで学習していた。
+
+### 変更内容
+- `src/mux_pwm/mux_pwm/pwm_mux_node.py`: `/mux_pwm` を出すたびに、その出どころを `/mux_pwm/source`（`std_msgs/String`）に出す。値は `manual` / `auto` / `auto_l2`（自動で L2 を押している間。スティックが中立でも含む）。既存のトピックと動作は変えていない。
+- `src/tools/bag_recorder/config/bag_recorder_params.yaml`: `topic_list` に `/mux_pwm/source` を追加した。
+- `training_src/dataset.py`:
+  - `/pwm_input` の各行に、その時刻以前で最後の `/mux_pwm/source` を `source` 列として付ける。
+  - `DataPreprocessConfig(source_weights=...)` でラベルごとの重みを決める。重み 0 のサンプルは作らない（検証と正規化統計からも外れる）。重みは教師の行で決める。
+  - ラベルの無い bag は全サンプル重み 1.0 で、今までと同じ結果になる。
+- `training_src/train.py`: `source_weights={"manual": 1.0, "auto": 0.0, "auto_l2": 3.0}`。学習データの重みが混ざるときは `WeightedRandomSampler` で重みに比例した頻度でサンプルを選ぶ。検証は重みなし。
+- `training_src/dataset_imu.py`: IMU の欠損でサンプルを絞るときに、重みの配列も同じく絞るようにした（IMU 系の挙動は変えていない）。
+
+### 確認状況
+- [x] 既存の bag（`rosbag2_2026_10_14-10_15_03_1`）で、変更前の `dataset.py` とサンプル・教師が完全に一致した（`source_weights` の有無どちらでも）。
+- [x] 合成 bag（manual → auto → auto_l2 → auto）で、`auto` の除外、`auto_l2` の重み 3.0、`RosbagIMUDataset` で重みと教師の対応が保たれること、サンプラーの選ばれる比率が期待値どおりなことを確かめた。
+- [ ] 実機での `/mux_pwm/source` の確認（下の TODO）
+
+### TODO（実機）
+1. `make build` のあと `make run` で起動する（`bag_recorder_params.yaml` を反映させるため、ビルドが必要）。
+2. `ros2 topic echo /mux_pwm/source` で、PS ボタンで `manual` ⇔ `auto` が、自動中に L2 を押している間は `auto_l2` が出ることを確認する。
+3. `ros2 topic hz /mux_pwm/source` が `/mux_pwm` と同じくらいであることを確認する。
+4. 自動走行＋L2 補正で bag を記録し、`metadata.yaml` に `/mux_pwm/source` があることを確認する。
+5. 手動走行の bag と補正走行の bag を混ぜて学習する。`train.py` は `BASE_BAGS`（毎回含める bag）と Jetson の最新 bag を合わせて学習し、`model/transformer/my_model_<日時>.pth` に保存する。補正走行の bag は、使い終わったら `BASE_BAGS` に足して積み重ねる。`model/checkpoints/` は毎回上書きされる。
+
+---
+
 ## 2026-10-18 — IMU（ヨーレート）モデルの実機走行
 
 ### 目的

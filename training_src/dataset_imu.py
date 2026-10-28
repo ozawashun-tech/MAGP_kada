@@ -216,6 +216,7 @@ class RosbagIMUDataset(RosbagDataset):
                 print(f"  Removed {(~keep).sum()} samples with IMU gaps in history")
             self.history_indices = self.history_indices[keep]
             self.targets = self.targets[keep]
+            self.sample_weights = self.sample_weights[keep]
         print(f"  IMU samples: {len(self.history_indices)}")
 
     def __getitem__(self, idx):
