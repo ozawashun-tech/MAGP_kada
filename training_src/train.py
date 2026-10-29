@@ -145,6 +145,11 @@ def train_model(
         stop_margin_before=20,
         stop_margin_after=20,
         source_weights=source_weights,
+        # 壁に当たっている（前方 ±15° に 0.1m 未満）・止まっている区間は教師から外す
+        # 抜け出してから 1 秒（約 40 フレーム）も外す
+        blocked_front_distance=0.1,
+        stuck_scan_change=0.008,
+        collision_margin_after=40,
     )
     scan_df, joy_df, file_boundaries = load_rosbags(bag_paths, preprocess_configs=config)
 

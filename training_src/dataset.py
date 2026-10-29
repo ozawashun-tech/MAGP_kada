@@ -18,6 +18,12 @@ class DataPreprocessConfig:
         stop_margin_before=0,
         stop_margin_after=0,
         source_weights=None,
+        blocked_front_distance=None,
+        blocked_front_angle=15.0,
+        stuck_scan_change=None,
+        stuck_window=20,
+        collision_margin_before=0,
+        collision_margin_after=0,
     ):
         """
         Args:
@@ -34,6 +40,15 @@ class DataPreprocessConfig:
                 例: {"manual": 1.0, "auto": 0.0, "auto_l2": 3.0}
                 0 のラベルは学習から除外する。辞書にないラベルとラベルの無い bag は 1.0
                 None なら全サンプル 1.0
+            blocked_front_distance: 前方 ±blocked_front_angle 度の最小距離がこれ未満の行を、教師から外す（m）
+                壁に当たっている・押し付けられている区間。None なら判定しない
+            blocked_front_angle: 前方とみなす角度の範囲（度、片側）
+            stuck_scan_change: 直近 stuck_window フレームの平均で、隣り合うスキャンの差（中央値）が
+                これ未満の行を、止まっているとみなして教師から外す（m）。None なら判定しない
+            stuck_window: stuck_scan_change の平均を取るフレーム数
+            collision_margin_before: 外す区間の前に広げるサンプル数
+            collision_margin_after: 外す区間の後に広げるサンプル数
+                （抜け出した直後も、履歴には止まっていたときのスキャンが残るため）
         """
         if trim_front < 0 or trim_back < 0 or trim_front + trim_back >= 1.0:
             raise ValueError("trim_front and trim_back must be in [0, 1)")
@@ -45,6 +60,12 @@ class DataPreprocessConfig:
         self.stop_margin_before = stop_margin_before
         self.stop_margin_after = stop_margin_after
         self.source_weights = source_weights
+        self.blocked_front_distance = blocked_front_distance
+        self.blocked_front_angle = blocked_front_angle
+        self.stuck_scan_change = stuck_scan_change
+        self.stuck_window = stuck_window
+        self.collision_margin_before = collision_margin_before
+        self.collision_margin_after = collision_margin_after
 
 
 SOURCE_TOPIC = "/mux_pwm/source"
@@ -229,6 +250,68 @@ def assign_sample_weights(joy_df, source_weights):
     return joy_df
 
 
+def exclude_collisions(
+    scan_df,
+    joy_df,
+    blocked_front_distance=None,
+    blocked_front_angle=15.0,
+    stuck_scan_change=None,
+    stuck_window=20,
+    margin_before=0,
+    margin_after=0,
+):
+    """
+    壁に当たっている行と、止まっている行の sample_weight を 0 にする（行は消さない）
+
+    学習データに無い状態なので、教師に入れても良い動きは学べない。
+    L2 補正の bag では、ここの教師はモデル自身の（学習範囲外で速くなった）出力になる。
+    行を消すと前後の履歴がつながってしまうため、重みだけを 0 にして、履歴には残す。
+    """
+    if blocked_front_distance is None and stuck_scan_change is None:
+        return joy_df
+    if len(scan_df) == 0:
+        return joy_df
+
+    ranges = np.stack(scan_df["ranges"].to_numpy()).astype(np.float32)
+    ranges = np.where(np.isfinite(ranges), ranges, np.inf)  # 測れなかった点は遠いとみなす
+    is_bad = np.zeros(len(ranges), dtype=bool)
+
+    n_blocked = n_stuck = 0
+    if blocked_front_distance is not None:
+        angles = scan_df["angle_min"].iloc[0] + np.arange(ranges.shape[1]) * scan_df["angle_increment"].iloc[0]
+        front = np.abs(angles) <= np.deg2rad(blocked_front_angle)
+        blocked = ranges[:, front].min(axis=1) < blocked_front_distance
+        n_blocked = int(blocked.sum())
+        is_bad |= blocked
+
+    if stuck_scan_change is not None:
+        finite = np.where(np.isfinite(ranges), ranges, 0.0)
+        change = np.r_[np.inf, np.median(np.abs(np.diff(finite, axis=0)), axis=1)]
+        # 直近 stuck_window フレームの平均（先頭は足りる分だけで平均する）
+        csum = np.cumsum(np.r_[0.0, np.minimum(change, 1e3)])
+        idx = np.arange(1, len(change) + 1)
+        start = np.maximum(idx - stuck_window, 0)
+        mean_change = (csum[idx] - csum[start]) / (idx - start)
+        stuck = mean_change < stuck_scan_change
+        n_stuck = int(stuck.sum())
+        is_bad |= stuck
+
+    # 前後のマージン
+    mask = is_bad.copy()
+    for i in np.flatnonzero(is_bad):
+        mask[max(0, i - margin_before) : i + margin_after + 1] = True
+
+    joy_df = joy_df.copy()
+    if "sample_weight" not in joy_df.columns:
+        joy_df["sample_weight"] = 1.0
+    joy_df.loc[mask, "sample_weight"] = 0.0
+    print(
+        f"  Collision/stuck excluded: {int(mask.sum())} samples "
+        f"(blocked front: {n_blocked}, stuck: {n_stuck}, margin: -{margin_before}/+{margin_after})"
+    )
+    return joy_df
+
+
 def preprocess_data(scan_df, joy_df, config=None):
     """
     データの前処理を実行
@@ -262,6 +345,18 @@ def preprocess_data(scan_df, joy_df, config=None):
 
     # ラベルごとの重み
     joy_df = assign_sample_weights(joy_df, config.source_weights)
+
+    # 壁に当たっている・止まっている区間は教師から外す
+    joy_df = exclude_collisions(
+        scan_df,
+        joy_df,
+        config.blocked_front_distance,
+        config.blocked_front_angle,
+        config.stuck_scan_change,
+        config.stuck_window,
+        config.collision_margin_before,
+        config.collision_margin_after,
+    )
 
     return scan_df, joy_df
 
