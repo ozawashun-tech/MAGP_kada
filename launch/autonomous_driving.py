@@ -42,6 +42,7 @@ def generate_launch_description():
             parameters=[{
                 'speed_sensitivity': 0.5,  # 直進感度の倍率（<1.0で鈍く、>1.0で敏感）
                 'speed_expo': 1.0,  # 直進カーブ指数（1.0=線形, >1.0で低速域が細かく操作可能）
+                'l2_slowest_motor': 1545,  # L2 中にスティックを後ろに倒しきったときの PWM（止まらない最も遅い値）
             }]
         ),
         

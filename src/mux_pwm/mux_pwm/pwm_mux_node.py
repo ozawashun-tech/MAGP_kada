@@ -24,6 +24,9 @@ class PwmMuxNode(Node):
         self.declare_parameter('speed_sensitivity', 1.0)  # 直進感度（スティック入力の倍率）
         self.declare_parameter('speed_expo', 1.0)  # 直進カーブ指数（1.0=線形, >1で中央付近が穏やか）
         self.declare_parameter('manual_gain', 1.0)
+        # L2 中にスティックを後ろに倒したとき、最後まで倒すとこの PWM まで遅くする（中立は越えない）
+        # 止まらずに走れる最も遅い値にする。倒しきると止まるなら下げ、まだ速いなら上げる
+        self.declare_parameter('l2_slowest_motor', 1545)
         self.declare_parameter('torch_gain', 1.0) # torch_pwm倍率のデフォルト値
         self.declare_parameter('gain_step', 0.2)
         self.declare_parameter('torch_gain_step', 0.1)
@@ -44,6 +47,7 @@ class PwmMuxNode(Node):
         self.SPEED_SENSITIVITY = self.get_parameter('speed_sensitivity').value
         self.SPEED_EXPO = self.get_parameter('speed_expo').value
         self.manual_gain = self.get_parameter('manual_gain').value
+        self.L2_SLOWEST_MOTOR = self.get_parameter('l2_slowest_motor').value
         self.torch_gain = self.get_parameter('torch_gain').value
         self.gain_step = self.get_parameter('gain_step').value
         self.torch_gain_step = self.get_parameter('torch_gain_step').value
@@ -167,6 +171,26 @@ class PwmMuxNode(Node):
         
         return output_msg
     
+    def apply_l2_deceleration(self, torch_motor, joy_value):
+        """
+        L2 中にスティックを後ろに倒したときのモーター PWM
+        モデル出力から l2_slowest_motor までを、倒した量に比例して遅くする
+
+        後退側の変換（中立 → motor_max の 1080µs）をそのまま足すと、少し倒しただけで
+        中立を越えて ESC がブレーキに入り、すぐ止まるため
+        Args:
+            torch_motor: torch_gain 適用済みのモデル出力
+            joy_value: axes[1] の値（-1.0 ~ -speed_deadzone）
+        Returns:
+            motor_pwm: PWM値(マイクロ秒)float型
+        """
+        # speed_sensitivity は掛けない（倒しきったときに l2_slowest_motor まで届くように）
+        adjusted = (abs(joy_value) - self.SPEED_DEADZONE) / (1.0 - self.SPEED_DEADZONE)
+        adjusted = min(1.0, adjusted ** self.SPEED_EXPO)
+        # モデル出力がすでに l2_slowest_motor より遅ければ、そのまま
+        slowest = max(torch_motor, self.L2_SLOWEST_MOTOR)
+        return float(torch_motor + self.manual_gain * adjusted * (slowest - torch_motor))
+    
     def apply_manual_addition(self, torch_pwm_msg, joy_msg):
         """
         手動加算: mux = manual_gain * (manual - neutral) + torch
@@ -195,7 +219,11 @@ class PwmMuxNode(Node):
         manual_steering_offset = manual_steering - self.STEERING_CENTER
         
         # 手動加算: mux = torch + gain * manual_offset
-        mixed_motor = torch_motor + self.manual_gain * manual_motor_offset
+        # 後ろに倒したときは足し算ではなく、l2_slowest_motor に向けて少しずつ減速する
+        if joy_msg.axes[1] <= -self.SPEED_DEADZONE:
+            mixed_motor = self.apply_l2_deceleration(torch_motor, joy_msg.axes[1])
+        else:
+            mixed_motor = torch_motor + self.manual_gain * manual_motor_offset
         mixed_steering = torch_steering + 3 * manual_steering_offset
         
         # クリッピング
