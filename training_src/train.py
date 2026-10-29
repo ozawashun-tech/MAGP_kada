@@ -39,12 +39,15 @@ class WeightedMSELoss(nn.Module):
         return weighted_mse.mean()
 
 
-def compute_normalization_stats(dataset):
+def compute_normalization_stats(dataset, per_dim_target=False):
     """
     データセットから正規化統計量（平均と標準偏差）を計算
 
     Args:
         dataset: RosbagDatasetインスタンス
+        per_dim_target: True ならターゲットの平均・標準偏差を次元ごと（モーター・ステアリング）に出す
+            False なら両方をまとめた 1 つの値。まとめると、ばらつきの小さいモーター
+            （std 約 6µs、ステアリングは約 150µs）の誤差が損失にほとんど効かない
 
     Returns:
         tuple: (scan_mean, scan_std, target_mean, target_std)
@@ -61,9 +64,15 @@ def compute_normalization_stats(dataset):
         n_scan += scan.size
         s_scan += scan.sum()
         ss_scan += (scan**2).sum()
-        n_target += target.size
-        s_target += target.sum()
-        ss_target += (target**2).sum()
+        if per_dim_target:
+            target = target.reshape(-1, target.shape[-1])  # (prediction_steps, 2)
+            n_target += len(target)
+            s_target += target.sum(axis=0)
+            ss_target += (target**2).sum(axis=0)
+        else:
+            n_target += target.size
+            s_target += target.sum()
+            ss_target += (target**2).sum()
 
     def mean_std(n, s, ss):
         mean = s / n
@@ -74,7 +83,7 @@ def compute_normalization_stats(dataset):
     target_mean, target_std = mean_std(n_target, s_target, ss_target)
 
     print(f"  Scan - mean: {scan_mean:.4f}, std: {scan_std:.4f}")
-    print(f"  Target - mean: {target_mean:.4f}, std: {target_std:.4f}")
+    print(f"  Target - mean: {np.round(target_mean.numpy(), 4)}, std: {np.round(target_std.numpy(), 4)}")
 
     return scan_mean, scan_std, target_mean, target_std
 
@@ -159,7 +168,7 @@ def train_model(
     # 正規化統計量の計算
     if use_normalization:
         scan_mean, scan_std, target_mean, target_std = compute_normalization_stats(
-            dataset
+            dataset, per_dim_target=True
         )
 
         # テンソルをデバイスに転送
@@ -239,7 +248,7 @@ def train_model(
             else:
                 # 統計量がない場合は新規計算
                 scan_mean, scan_std, target_mean, target_std = \
-                    compute_normalization_stats(dataset)
+                    compute_normalization_stats(dataset, per_dim_target=True)
                 scan_mean = scan_mean.to(device)
                 scan_std = scan_std.to(device)
                 target_mean = target_mean.to(device)
