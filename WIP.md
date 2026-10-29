@@ -4,6 +4,54 @@
 
 ---
 
+## 2026-10-28 — L2 補正の bag で学習し直すサイクル（branch: `L2`）
+
+### 目的
+自動走行中に L2 で補正し、その bag で学習し直したモデルを、すぐ実機に入れて走らせるサイクルを回す（HG-DAgger に近いやり方）。本番は時間が無いので、コードの編集や長い CLI を打たずに、PC の `make dagger` 1 回と、車の PS ボタンだけで回せるようにする。
+
+本番での 1 サイクル:
+1. 車: 自動で走らせ、まずい所で L2 を押しながら補正する。記録は今までどおりジョイスティックで開始・停止する。
+2. PC: `make dagger`（Jetson の新しい bag をセッションに足す → 学習 → Jetson に送って `current.pth` を付け替える）。
+3. 車: Manual のまま 1 秒ほど待つと、推論ノードが新しいモデルを読み込む。PS ボタンで Auto にして走らせる。
+- コースや走る向きが変わったら `make new-session`。新しいモデルの走りが悪ければ `make rollback`。
+
+### 変更内容
+- 10/28 に打ち消した `l2-intervention-weighting`（57c5dd8・d23e62f）を入れ直した。`BASE_BAGS`（逆回りの bag を混ぜて悪くなった）と、bag・`.dockerignore` を管理から外す変更は入れていない。
+  - `pwm_mux_node`: `/mux_pwm/source`（`manual` / `auto` / `auto_l2`）を出す。`bag_recorder` の記録対象にも加えた。
+  - `dataset.py` / `dataset_imu.py` / `train.py`: `source_weights={"manual": 1.0, "auto": 0.0, "auto_l2": 3.0}` で重み付けし、重みが混ざると `WeightedRandomSampler` を使う。ラベルの無い bag は全部 1.0。
+- `training_src/jetson_sync.py`:
+  - `new_session()`: `dataset/train/session.txt`（git 管理外）を作り直す。今 Jetson にある bag は `#` 付き（使わない）で書く。前の session.txt は `session_<日時>.txt` に残す。
+  - `sync_session()`: Jetson にあって session.txt に無い bag を書き足し、`#` の無い bag をすべて rsync して返す。記録中の bag（`metadata.yaml` が無い）は次回に回る。Jetson に接続できなければエラーで止まる。
+  - `deploy_model()`: モデルを `/home/jetson/models/` に一時名で送ってから名前を付け、`current.pth` を付け替える。前の行き先は `previous.pth` に残す（初回は `my_model.pth`）。既存のファイルは上書きしない。
+  - `rollback_model()`: `current.pth` と `previous.pth` の行き先を入れ替える。
+- `training_src/train.py`: `--session`（session.txt の bag で学習）と `--deploy` を追加した。保存先は `model/transformer/my_model_<日時>.pth`（今までは `my_model.pth` を上書きしていた）。引数なしなら従来どおり最新の bag 1 本で学習する。
+- `nn_pwm_controller_node.py`:
+  - `model_path` が無ければ `fallback_model_path` を使う。
+  - 1 秒ごと（`model_check_period`）に、モデルファイルの実体のパスと更新時刻を見て、変わっていたら Manual 中に読み込み直す。Auto 中は Manual に戻るまで待つ（読み込みの間は推論が止まり、`pwm_mux_node` が古い `/torch_pwm` を出し続けるため）。読み込みに失敗したら前のモデルのまま。`reload_model: False` で無効。
+- `launch/autonomous_driving.py`: `model_path` を `/home/jetson/models/current.pth`、`fallback_model_path` を `my_model.pth` にした。deploy するまでは今までと同じモデルで走る。
+- `Makefile`: PC 用に `make dagger` / `make new-session` / `make rollback` を追加した。
+
+### 確認状況
+- [x] ssh・rsync をローカルで動く偽物にして、`jetson_sync.py` を確認した: new-session 前の sync はエラー、new-session 後は既存の bag を使わない、新しい bag だけ書き足す、記録中の bag は飛ばす、`#` を消した bag は使う、deploy で `current.pth` / `previous.pth` が期待どおりに付け替わる、同名のモデルは上書きせず止まる、rollback を 2 回で元に戻る。
+- [x] rclpy と Model をスタブにして推論ノードを確認した: current.pth が無ければ fallback、Manual 中の付け替えで読み込み直す、Auto 中は Manual まで待つ（ログは 1 回）、壊れたファイルは前のモデルのまま（エラーは 1 回）、rollback と同じパスの上書きでも読み込み直す、Auto 切り替え時の履歴のリセットは従来どおり。
+- [ ] この PC には torch・ROS が無いため、学習（`train.py`）と `colcon build` は動かしていない。`dataset.py` の重み付けは 10/19 に確認したものと同じ。
+- [ ] 実機での確認（下の TODO）
+
+### TODO（実機・練習コース）
+1. PC から `ssh jetson` で入れるようにする（`~/.ssh/config` か `MAGP_JETSON_HOST`、鍵認証。`BatchMode=yes` なのでパスワードは聞かれない）。本番の会場でも PC と Jetson が同じネットワークにつながるか確かめておく。
+2. Jetson で `make build` → `make run`。ログに `my_model.pth` を使う旨の警告と `Reload model in Manual: True` が出ることを確認する。
+3. `ros2 topic echo /mux_pwm/source` で `manual` / `auto` / `auto_l2` が切り替わることを確認する。
+4. PC で `make new-session` → 手動走行を記録 → `make dagger`。ログの `Source weights` を見て、学習・転送にかかった時間を測る。
+5. Manual のままで `Model reloaded: ...` が出ることを確認し、Auto で走らせる。Auto 中に `make dagger` が終わった場合は、Manual に戻した時点で読み込まれることを確認する。
+6. 自動走行＋L2 補正を記録 → `make dagger` を 2〜3 回繰り返し、走りが良くなるかを見る。悪くなったら `make rollback`。1 サイクルの時間が長すぎる場合は、前回のモデルから学習を続ける（fine-tune）方式を検討する。
+
+### 運用の注意
+- `auto_l2` の教師のモーター値には `torch_gain` が掛かっている。補正走行中の `torch_gain` は学習させたい値（普通は 1.0）にしておく。
+- L2 を押している間は、スティックが中立でもモデルの出力が 3 倍の重みの教師になる。補正が終わったら L2 を離す。
+- 補正走行で失敗した bag は、記録を破棄するか、session.txt で行頭に `#` を付けて外す。
+
+---
+
 ## 2026-10-28 — Auto に切り替えたら推論の履歴を埋め直す（branch: `reset-history-on-auto-v2`）
 
 ### 目的

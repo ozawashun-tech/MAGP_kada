@@ -21,3 +21,5 @@ __pycache__/
 
 # VSCode settings
 .vscode
+# 学習に使う bag の一覧（make new-session / make dagger が更新する）
+dataset/train/session*.txt

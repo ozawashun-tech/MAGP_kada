@@ -1,0 +1,35 @@
+# リポジトリルートから:
+#   UID=$(id -u) GID=$(id -g) docker compose -f docker/docker-compose.yml build
+#   docker compose -f docker/docker-compose.yml run --rm magp bash
+# （UID / GID はホストのユーザーに合わせる。root 所有の成果物を作らないため）
+#
+# 実機 Jetson では使わない。
+services:
+  magp:
+    image: magp-dev:humble
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        USER_UID: ${UID:-1000}
+        USER_GID: ${GID:-1000}
+        TORCH_FLAVOR: ${MAGP_TORCH_FLAVOR:-cpu}
+    working_dir: /ws
+    volumes:
+      - ..:/ws
+    network_mode: host
+    ipc: host
+    stdin_open: true
+    tty: true
+    environment:
+      - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-0}
+      - DISPLAY=${DISPLAY:-}
+    # ホストにジョイスティックがあるときだけ有効化
+    # devices:
+    #   - /dev/input/js0
+    # GPU を使うとき（NVIDIA Container Toolkit が必要。TORCH_FLAVOR=cu121 でビルド）
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - capabilities: [gpu]

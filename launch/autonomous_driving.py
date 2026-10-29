@@ -52,7 +52,10 @@ def generate_launch_description():
             name='nn_pwm_controller_node',
             output='screen',
             parameters=[{
-                'model_path': '/home/jetson/models/my_model.pth',
+                # PC の make dagger が current.pth を新しいモデルに付け替える（Manual 中に読み込み直す）
+                # 一度も付け替えていなければ my_model.pth を使う
+                'model_path': '/home/jetson/models/current.pth',
+                'fallback_model_path': '/home/jetson/models/my_model.pth',
                 'scan_history_length': 20,
                 'scan_history_stride': 10,
             }]

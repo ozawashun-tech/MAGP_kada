@@ -33,38 +33,49 @@ class NNControllerNode(Node):
         self.declare_parameter('scan_history_stride', 10)
         self.declare_parameter('mode_topic', '/mux_pwm/status')
         self.declare_parameter('reset_history_on_auto', True)
+        # model_path が無いときに使うモデル（current.pth を一度も deploy していないとき）
+        self.declare_parameter('fallback_model_path', '')
+        # model_path の差し替え（current.pth の付け替え）を見て、Manual 中に読み込み直す
+        self.declare_parameter('reload_model', True)
+        self.declare_parameter('model_check_period', 1.0)
         
         # パラメータの取得
         model_path = self.get_parameter('model_path').get_parameter_value().string_value
-        prediction_steps = self.get_parameter('prediction_steps').get_parameter_value().integer_value
+        self.prediction_steps = self.get_parameter('prediction_steps').get_parameter_value().integer_value
         self.scan_history_length = self.get_parameter('scan_history_length').get_parameter_value().integer_value
         self.scan_history_stride = self.get_parameter('scan_history_stride').get_parameter_value().integer_value
         self.reset_history_on_auto = self.get_parameter('reset_history_on_auto').get_parameter_value().bool_value
+        self.fallback_model_path = self.get_parameter('fallback_model_path').get_parameter_value().string_value
+        reload_model = self.get_parameter('reload_model').get_parameter_value().bool_value
+        model_check_period = self.get_parameter('model_check_period').get_parameter_value().double_value
         
         # モデルパスが指定されていない場合はデフォルトパスを使用
         if not model_path:
             package_share_dir = get_package_share_directory('pytorch_pwm_controller')
             model_path = os.path.join(package_share_dir, 'model', 'model_v9.pth')
+        self.model_path = model_path
+        if not os.path.exists(model_path) and self.fallback_model_path:
+            self.get_logger().warn(f'{model_path} not found, using {self.fallback_model_path}')
+            model_path = self.fallback_model_path
         
         scan_topic = self.get_parameter('scan_topic').get_parameter_value().string_value
         pwm_topic = self.get_parameter('pwm_topic').get_parameter_value().string_value
         mode_topic = self.get_parameter('mode_topic').get_parameter_value().string_value
         
         self.get_logger().info(f'Loading model from: {model_path}')
-        self.get_logger().info(f'Prediction steps: {prediction_steps}')
+        self.get_logger().info(f'Prediction steps: {self.prediction_steps}')
         self.get_logger().info(f'Scan history: length={self.scan_history_length}, stride={self.scan_history_stride}')
         
         # モデルの初期化
         try:
-            self.model = Model(
-                model_path,
-                prediction_steps=prediction_steps,
-                scan_history_length=self.scan_history_length,
-            )
-            self.get_logger().info('Model loaded successfully')
+            self.model = self.load_model(model_path)
+            self.get_logger().info(f'Model loaded successfully: {os.path.realpath(model_path)}')
         except Exception as e:
             self.get_logger().error(f'Failed to load model: {str(e)}')
             raise
+        self.loaded_signature = self.model_signature()
+        self.failed_signature = None
+        self.reload_pending = False
         
         # Subscriber
         self.scan_sub = self.create_subscription(
@@ -84,9 +95,52 @@ class NNControllerNode(Node):
         # Publisher (TwistStamped for PWM commands)
         self.pwm_pub = self.create_publisher(TwistStamped, pwm_topic, 10)
         
+        if reload_model:
+            self.model_timer = self.create_timer(model_check_period, self.check_model_file)
+        
         self.get_logger().info(f'Subscribing to: {scan_topic}')
         self.get_logger().info(f'Publishing to: {pwm_topic}')
         self.get_logger().info(f'Reset history on Auto: {self.reset_history_on_auto} ({mode_topic})')
+        self.get_logger().info(f'Reload model in Manual: {reload_model} ({self.model_path})')
+    
+    def load_model(self, path):
+        return Model(
+            path,
+            prediction_steps=self.prediction_steps,
+            scan_history_length=self.scan_history_length,
+        )
+    
+    def model_signature(self):
+        """今読むべきモデルファイルの (実体のパス, 更新時刻)。無ければ None"""
+        for path in (self.model_path, self.fallback_model_path):
+            if path and os.path.exists(path):
+                real_path = os.path.realpath(path)
+                return real_path, os.stat(real_path).st_mtime_ns
+        return None
+    
+    def check_model_file(self):
+        """モデルファイルが差し替わっていたら、Manual 中に読み込み直す"""
+        signature = self.model_signature()
+        if signature is None or signature in (self.loaded_signature, self.failed_signature):
+            return
+        
+        # 読み込み中は推論が止まり、pwm_mux_node は古い /torch_pwm を出し続けるため、Auto 中は読まない
+        if self.auto_mode:
+            if not self.reload_pending:
+                self.reload_pending = True
+                self.get_logger().info(f'New model found, will load it in Manual: {signature[0]}')
+            return
+        
+        try:
+            model = self.load_model(signature[0])
+        except Exception as e:
+            self.failed_signature = signature
+            self.get_logger().error(f'Failed to reload model, keeping the current one: {str(e)}')
+            return
+        self.model = model
+        self.loaded_signature = signature
+        self.reload_pending = False
+        self.get_logger().info(f'Model reloaded: {signature[0]}')
     
     def mode_callback(self, msg: String):
         """pwm_mux_node のモード（{"mode": "Auto" | "Manual", ...}）を受け取る"""
