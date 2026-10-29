@@ -155,6 +155,8 @@ class ModelIMU:
         self.scan_history_stride = checkpoint["scan_history_stride"]
         self.prediction_steps = checkpoint["prediction_steps"]
         self.imu_features = list(checkpoint["imu_features"])
+        # 学習時に IMU 全体を平均値にした確率。0 なら、IMU が無い入力は学習していない
+        self.imu_dropout_p = checkpoint.get("imu_dropout_p") or 0.0
 
         self.model = DNNIMU(
             scan_history_length=self.scan_history_length,
@@ -181,19 +183,25 @@ class ModelIMU:
         print(f"  history: length={self.scan_history_length}, stride={self.scan_history_stride}, "
               f"imu_features={self.imu_features}")
 
-    def inference_next_step_only(self, scan_ranges, imu_values):
+    def inference_next_step_only(self, scan_ranges, imu_values=None):
         """
         Args:
             scan_ranges: (scan_history_length, scan_dim) の生のスキャン
-            imu_values: (scan_history_length, imu_dim) の生の IMU 特徴量
+            imu_values: (scan_history_length, imu_dim) の生の IMU 特徴量。
+                None なら IMU 全体を平均値（正規化後の 0）にする。学習時の modality dropout と同じ入力
 
         Returns:
             次ステップの予測 [throttle, angle]（PWM µs）
         """
         scans = torch.from_numpy(np.asarray(scan_ranges, dtype=np.float32)).unsqueeze(0).to(self.device)
-        imus = torch.from_numpy(np.asarray(imu_values, dtype=np.float32)).unsqueeze(0).to(self.device)
         scans = (scans - self.scan_mean) / (self.scan_std + 1e-8)
-        imus = (imus - self.imu_mean) / (self.imu_std + 1e-8)
+        if imu_values is None:
+            imus = torch.zeros(
+                1, self.scan_history_length, len(self.imu_features), device=self.device
+            )
+        else:
+            imus = torch.from_numpy(np.asarray(imu_values, dtype=np.float32)).unsqueeze(0).to(self.device)
+            imus = (imus - self.imu_mean) / (self.imu_std + 1e-8)
 
         with torch.no_grad():
             output = self.model(scans, imus)

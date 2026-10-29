@@ -4,6 +4,46 @@
 
 ---
 
+## 2026-10-29 — IMU モデルが Auto にしても止まったままだった件（branch: `imu`）
+
+### 目的
+10/18 の実機走行で、`model:=lidar` は走ったが `model:=imu`（`imu_20261018_gz_len20_str10_s2_seed2.pth`）は Auto にしてもその場で止まったままだった。Jetson のログはまだ見られていないので、オフラインで原因を絞り、推論ノードを直す。
+
+### オフラインで確かめたこと（10/18 の bag 3 本、git の f1ef07d から取り出した）
+- **IMU の入力はスロットルにまったく効いていない**。止まっているときの実測値（gz≈0）を入れても、学習時の平均（−0.72 rad/s）を入れても、出力の差は 1 µs 以下。「IMU が静止を伝えるので発進しない」という仮説は外れ。
+- コース上の各地点で止まった状態（同じスキャン × 20）を入れると、スロットルの中央値は LiDAR モデル 1498〜1529 µs・IMU モデル 1495〜1526 µs で、どちらも 8〜9 割の地点で前進側（< 1600）を出す。モデルの出力だけでは「LiDAR は動いて IMU は止まる」は説明できない。
+- bag 1 のスタート地点（人が 5.7 秒止まっていた所。169 サンプルが中立の教師として学習に入っている）では、両モデルとも中立以上（LiDAR 1625〜1641、IMU 1641〜1663）を出して発進しない。IMU の方が 10〜20 µs 発進しにくい側。
+
+### 仮説（Jetson のログで確かめる）
+1. **IMU ノードが起動していなかった、または落ちていた**。`nn_imu_pwm_controller_node` は 10/18 に追加した entry point なので、Jetson で `colcon build` し直さないと実行ファイルが無い（`model:=lidar` は既存の実行ファイルなので動く）。`/torch_pwm` が来ないと、`pwm_mux_node` は Auto で何も出さず、`pwm_pca9685_controller` は最後の手動の値（中立）のまま。
+2. **IMU を使えないと判定し、中立を出し続けていた**（旧版の動作。IMU の途切れが 1 回でもあると約 4.8 秒中立）。
+3. Auto にした場所が bag 1 のスタート地点のような「待つ場所」だった。
+
+### 変更内容
+- `nn_imu_pwm_controller_node.py`:
+  - `imu_fallback`（既定 `mean`）: IMU が使えないときは、IMU の履歴全体を平均値（正規化後の 0）にして推論を続ける。学習の modality dropout（`imu_dropout_p=0.25`）と同じ入力なので、学習で扱った状態。`neutral` で従来どおり中立を出す。チェックポイントの `imu_dropout_p` が 0 のモデルでは、`mean` を指定しても `neutral` になる。
+  - `status_log_period`（既定 2 秒）: `[status] Auto | 推論 40.0 Hz | IMU: ok (IMU 0.02s 前) | thr=1514 str=1229` の形で、モード・履歴の溜まり具合・IMU の状態・最後の出力をログに出す。`/scan 未受信`・`IMU 未受信` も出る。
+  - `reset_history_on_auto`（既定 `True`）: LiDAR 版（10/28）と同じく、Manual → Auto で scan と IMU の履歴を最新の 1 フレームで埋め直す。
+- `model_imu.py`（2 か所）: `ModelIMU.imu_dropout_p` を読む。`inference_next_step_only(scan, None)` で IMU を平均値にして推論する。
+- `launch/autonomous_driving_imu.py`: 上の 3 つのパラメータを明示した。
+
+### 確認状況
+- [x] rclpy をスタブにして、10/18 の bag（`15_14_47_3`）の `/scan`・`/imu/data` を流した: 出力がオフライン推論と一致、IMU なしでは `mean` で推論を続け（警告は 1 回）、`neutral` では中立、走行中に IMU が 1.5 秒止まると ok → mean → ok、Auto 切り替えで履歴をリセット（`reset_history_on_auto: False` ではしない）、`imu_dropout_p=0` のモデルは neutral、不正な `imu_fallback` は起動時にエラー、状態ログの内容。
+- 起動直後は、最初の IMU より前に届いた scan が履歴に残るため、推論の最初の 1 フレームだけ `mean` の警告が出て、すぐ `IMU OK` に戻る（旧版ではこの 1 フレームは中立だった）。
+- [ ] この PC には ROS が無いので、`colcon build` は動かしていない。
+- [ ] 実機での確認（下の TODO）
+
+### TODO（実機）
+1. **10/18 のログを確認する**: Jetson の `~/.ros/log/2026-10-18-*/launch.log` で、`executable 'nn_imu_pwm_controller_node' not found`・`Failed to load model`・`IMU が使えないため、中立の PWM を出します` のどれが出ているかを見て、上の仮説 1〜3 のどれかを確かめる。結果をここに書く。
+2. `git pull` → `make build` のあと、`ros2 pkg executables pytorch_pwm_controller` に `nn_imu_pwm_controller_node` があることを確認する。
+3. `source install/setup.bash && ros2 launch launch/autonomous_driving_imu.py` で起動する。最初は `torch_gain` を下げ、PS ボタンですぐ手動に戻せる状態で走らせる。
+4. 起動ログに `IMU fallback: mean (imu_dropout_p=0.25)`・`Ready for inference`・`IMU OK` が出ること、`[status]` が 2 秒ごとに `推論 約 40 Hz` で出ることを確認する。
+5. PS ボタンで Auto にするたびに `Switched to Auto: scan/IMU history reset to the latest frame` が出ること、Auto で走り出すことを確認する。走らなければ、`[status]` の `thr=` の値を記録する（1620 以上なら発進しない側の出力）。
+6. 同じコースで `model:=lidar` に切り替えて走らせ、ラップタイム・コースアウトの回数・ステアリングの振れを比べる。結果は `experiments.md` に追記する。
+7. 車を浮かせた状態で bno085 のノードを止め、1 秒ほどで `IMU を平均値にして推論します` に切り替わり、出力が続くことを確認する。戻すと約 5 秒後に `IMU OK` に戻ることを確認する。
+
+---
+
 ## 2026-10-28 — Auto に切り替えたら推論の履歴を埋め直す（branch: `reset-history-on-auto-v2`）
 
 ### 目的
@@ -62,7 +102,7 @@
 - [x] 検証用の bag（`15_14_47_3`）の `/scan`・`/imu/data` を再生してノードに入れた（車は動かしていない、`ROS_DOMAIN_ID=77`）。出力はオフライン推論と一致した（ステアリングの差は中央値 0.00 µs）。記録された操作との誤差は、ステアリング 114.8 µs・スロットル 56.2 µs で、学習時の値と同じくらい。
 - [x] `/scan` だけを再生したとき（IMU なし）は、883 件すべて中立を出し、警告ログが出た。
 - [x] `lidar_20261018_len20_str10_s2_seed1.pth` を既存の `nn_pwm_controller_node` で読み込めた。
-- [ ] 実機での走行（下の TODO）
+- [x] 実機での走行（10/18）: `model:=lidar` は走った。`model:=imu` は Auto にしてもその場で止まったまま。原因の切り分けと対策は 10/29 の項に書いた。以下の TODO は 10/29 の項に引き継いだ。
 
 ### TODO（実機）
 1. `make build` のあと、`source install/setup.bash && ros2 launch launch/autonomous_driving_imu.py` で起動する。最初は `torch_gain` を下げ、PS ボタンですぐ手動に戻せる状態で走らせる。

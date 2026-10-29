@@ -75,6 +75,11 @@ def generate_launch_description():
             parameters=[{
                 'model_path': LaunchConfiguration('imu_model_path'),
                 # 履歴長・stride はチェックポイントから読む
+                # IMU が使えないとき: mean = IMU を平均値にして推論を続ける（学習時の dropout と同じ入力）、
+                # neutral = 中立を出して止まる
+                'imu_fallback': 'mean',
+                'reset_history_on_auto': True,
+                'status_log_period': 2.0,  # 出力と IMU の状態をログに出す周期（秒）
             }]
         ),
 
