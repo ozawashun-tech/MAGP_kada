@@ -65,7 +65,12 @@ def generate_launch_description():
             package='pwm_controller',
             executable='pwm_pca9685_controller',
             name='pwm_pca9685_controller',
-            output='screen'
+            output='screen',
+            parameters=[{
+                # 前進の速度リミットの初期値（小さいほど速い。十字キー上下で 10 ずつ変えられる）
+                # 手動走行は 1500〜1535 なので、これより速い指令（学習範囲外のモデル出力など）だけを抑える
+                'speed_center': 1490,
+            }]
         ),
         
         # bag_recorderを起動
