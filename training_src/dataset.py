@@ -475,6 +475,63 @@ class RosbagDataset(torch.utils.data.Dataset):
         
         return scan_history, targets
 
+    def device_tensors(self, device):
+        """all_scans・history_indices・targets・noise_std を device 上のテンソルにする（転送は device ごとに 1 回）"""
+        key = str(device)
+        if getattr(self, "_device_tensors", None) is None or self._device_tensors[0] != key:
+            self._device_tensors = (key, (
+                torch.from_numpy(self.all_scans).to(device),
+                torch.from_numpy(self.history_indices).to(device),
+                torch.from_numpy(self.targets).to(device),
+                torch.tensor(self.noise_std, dtype=torch.float32, device=device),
+            ))
+        return self._device_tensors[1]
+
+
+class DeviceBatchLoader:
+    """RosbagDataset のバッチを device 上で作る（DataLoader の代わり）
+
+    スキャン全体を最初に device に載せ、履歴の切り出しとノイズ付加を device 上で行う。
+    1 サンプルずつ CPU で作る DataLoader だと、GPU がデータ待ちでほとんど遊ぶため。
+    サンプルの選び方とノイズの掛け方は __getitem__ + DataLoader と同じ。
+
+    Args:
+        dataset: RosbagDataset
+        indices: 使うサンプルのインデックス（random_split の Subset.indices など）
+        batch_size: バッチサイズ
+        device: バッチを作る device
+        shuffle: エポックごとに順番を混ぜるか
+        weights: 指定すると、重みに比例した確率で復元抽出する（WeightedRandomSampler と同じ）
+    """
+
+    def __init__(self, dataset, indices, batch_size, device, shuffle=False, weights=None):
+        self.scans, self.history_indices, self.targets, self.noise_std = dataset.device_tensors(device)
+        self.indices = torch.as_tensor(np.asarray(indices), dtype=torch.long, device=device)
+        self.weights = None if weights is None else torch.as_tensor(weights, dtype=torch.double, device=device)
+        self.batch_size = batch_size
+        self.shuffle = shuffle
+
+    def __len__(self):
+        return (len(self.indices) + self.batch_size - 1) // self.batch_size
+
+    def __iter__(self):
+        device = self.indices.device
+        n = len(self.indices)
+        if self.weights is not None:
+            order = self.indices[torch.multinomial(self.weights, n, replacement=True)]
+        elif self.shuffle:
+            order = self.indices[torch.randperm(n, device=device)]
+        else:
+            order = self.indices
+
+        for start in range(0, n, self.batch_size):
+            idx = order[start : start + self.batch_size]
+            scans = self.scans[self.history_indices[idx]]  # (B, history, W)
+            # サンプルごとに noise_std から 1 つ選んでガウスノイズを足す
+            level = self.noise_std[torch.randint(len(self.noise_std), (len(idx),), device=device)]
+            scans = scans + torch.randn_like(scans) * level.view(-1, 1, 1)
+            yield scans, self.targets[idx]
+
 
 def custom_collate_fn(batch):
     """(scan_history, targets) のリストをテンソルのバッチにまとめる"""

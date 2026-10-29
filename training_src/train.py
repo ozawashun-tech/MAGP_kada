@@ -3,13 +3,13 @@ import torch
 import torch.nn as nn
 from dataset import (
     DataPreprocessConfig,
+    DeviceBatchLoader,
     RosbagDataset,
-    custom_collate_fn,
     load_rosbags,
 )
 from jetson_sync import deploy_model, fetch_latest_bags, sync_session
 from model import DNN
-from torch.utils.data import DataLoader, WeightedRandomSampler, random_split
+from torch.utils.data import random_split
 from datetime import datetime
 from pathlib import Path
 import os
@@ -186,26 +186,19 @@ def train_model(
     print(f"  Training samples: {train_size}")
     print(f"  Validation samples: {val_size}")
 
-    # DataLoaderの作成
+    # ローダーの作成（バッチは device 上で作る。CPU で作ると GPU がデータ待ちになる）
     # 重みが混ざるときは、重みに比例した頻度でサンプルを選ぶ（補正区間を重く扱う）
     train_weights = dataset.sample_weights[train_dataset.indices]
     if len(train_weights) > 0 and not np.all(train_weights == train_weights[0]):
-        sampler = WeightedRandomSampler(
-            torch.as_tensor(train_weights, dtype=torch.double),
-            num_samples=len(train_weights),
-            replacement=True,
-        )
         print("  Using weighted sampling for training")
-        train_loader = DataLoader(
-            train_dataset, batch_size=batch_size, sampler=sampler, collate_fn=custom_collate_fn
+        train_loader = DeviceBatchLoader(
+            dataset, train_dataset.indices, batch_size, device, weights=train_weights
         )
     else:
-        train_loader = DataLoader(
-            train_dataset, batch_size=batch_size, shuffle=True, collate_fn=custom_collate_fn
+        train_loader = DeviceBatchLoader(
+            dataset, train_dataset.indices, batch_size, device, shuffle=True
         )
-    val_loader = DataLoader(
-        val_dataset, batch_size=batch_size, shuffle=False, collate_fn=custom_collate_fn
-    )
+    val_loader = DeviceBatchLoader(dataset, val_dataset.indices, batch_size, device)
 
     # モデルの作成
     model = DNN(
