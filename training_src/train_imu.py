@@ -368,8 +368,9 @@ def train_imu_model(
                     print(f"\nEarly stopping triggered at epoch {epoch}")
                     break
 
-        model.load_state_dict(best_state)
-        print(f"  Best val loss: {best_val_loss:.6f}")
+        # 最後の epoch の重みのまま次のステージ・保存に進む（train.py と同じ）
+        # 検証 loss が最良の重みは best_stage{n}.pth に残す
+        print(f"  Best val loss: {best_val_loss:.6f}（使うのは最後の epoch: {metrics['val_loss']:.6f}）")
         save(build_checkpoint(stage, best_state, val_loss=best_val_loss),
              checkpoint_dir / f"best_stage{stage}.pth")
         return evaluate_all()
