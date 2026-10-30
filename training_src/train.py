@@ -105,6 +105,7 @@ def train_model(
     use_normalization=True,
     checkpoint_interval=10,  # 追加: チェックポイント保存間隔
     source_weights=None,
+    mirror=False,
 ):
     """
     モデルの学習を実行（正規化機能付き）
@@ -126,6 +127,7 @@ def train_model(
         use_normalization: データ正規化を使用するかどうか
         checkpoint_interval: チェックポイント保存間隔（エポック数）
         source_weights: /mux_pwm/source のラベルごとのサンプルの重み（DataPreprocessConfig を参照）
+        mirror: True ならスキャンとステアリングを左右反転して学習する（左右対称なもう一方のコース用）
     """
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
@@ -150,6 +152,11 @@ def train_model(
         blocked_front_distance=0.1,
         stuck_scan_change=0.008,
         collision_margin_after=40,
+        mirror=mirror,
+        # 反転の軸は、車がまっすぐ進むステアリングの PWM。10/29・10/30 の bag で、ジャイロの
+        # ヨーレートが 0 になる PWM を当てはめると 1272〜1274 だった（設定の中央は 1265）。
+        # ヨーレートの PWM に対する傾きは、中央の左右でほぼ同じ（比 0.8〜1.1）なので、線形に折り返す
+        mirror_steering_center=1273,
     )
     scan_df, joy_df, file_boundaries = load_rosbags(bag_paths, preprocess_configs=config)
 
@@ -450,16 +457,33 @@ if __name__ == "__main__":
         action="store_true",
         help="学習したモデルを Jetson に送り、current.pth をそれに付け替える",
     )
+    parser.add_argument(
+        "--mirror",
+        action="store_true",
+        help="スキャンとステアリングを左右反転して学習する（左右対称なもう一方のコースを走るモデル）",
+    )
+    parser.add_argument(
+        "--bags",
+        nargs="+",
+        help="学習に使う bag を直接指定する（dataset/train/ からの名前かパス）。Jetson には接続しない",
+    )
     args = parser.parse_args()
 
-    bag_paths = sync_session() if args.session else fetch_latest_bags()
+    if args.bags:
+        train_dir = Path(__file__).resolve().parent.parent / "dataset" / "train"
+        bag_paths = [Path(b) if Path(b).exists() else train_dir / b for b in args.bags]
+    elif args.session:
+        bag_paths = sync_session()
+    else:
+        bag_paths = fetch_latest_bags()
     print("\nBags used for training:")
     for path in bag_paths:
         print(f"  {path.name}")
 
     # 既存のモデルを上書きしないよう、学習した日時をファイル名に入れる
     model_dir = Path(__file__).resolve().parent.parent / "model" / "transformer"
-    model_save_path = model_dir / f"my_model_{datetime.now():%Y%m%d_%H%M%S}.pth"
+    prefix = "my_model_mirror" if args.mirror else "my_model"
+    model_save_path = model_dir / f"{prefix}_{datetime.now():%Y%m%d_%H%M%S}.pth"
 
     train_model(
         bag_paths=bag_paths,
@@ -478,6 +502,7 @@ if __name__ == "__main__":
         # 自動で L2 を押していない区間（教師がモデル自身の出力）は除外し、L2 で補正した区間を重くする
         # ラベル（/mux_pwm/source）の無い bag は全区間 1.0
         source_weights={"manual": 1.0, "auto": 0.0, "auto_l2": 3.0},
+        mirror=args.mirror,
     )
 
     if args.deploy:

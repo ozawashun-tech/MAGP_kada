@@ -24,6 +24,9 @@ class DataPreprocessConfig:
         stuck_window=20,
         collision_margin_before=0,
         collision_margin_after=0,
+        mirror=False,
+        mirror_steering_center=1265,
+        steering_limits=(950, 1740),
     ):
         """
         Args:
@@ -49,6 +52,10 @@ class DataPreprocessConfig:
             collision_margin_before: 外す区間の前に広げるサンプル数
             collision_margin_after: 外す区間の後に広げるサンプル数
                 （抜け出した直後も、履歴には止まっていたときのスキャンが残るため）
+            mirror: True ならスキャンとステアリングを左右反転する（左右対称なもう一方のコース用）
+            mirror_steering_center: 反転の軸にするステアリングの PWM（車がまっすぐ進む値）
+            steering_limits: 反転後のステアリングをこの範囲 (min, max) に収める
+                （ハードウェアで出せない値は教師にしない）
         """
         if trim_front < 0 or trim_back < 0 or trim_front + trim_back >= 1.0:
             raise ValueError("trim_front and trim_back must be in [0, 1)")
@@ -66,6 +73,9 @@ class DataPreprocessConfig:
         self.stuck_window = stuck_window
         self.collision_margin_before = collision_margin_before
         self.collision_margin_after = collision_margin_after
+        self.mirror = mirror
+        self.mirror_steering_center = mirror_steering_center
+        self.steering_limits = steering_limits
 
 
 SOURCE_TOPIC = "/mux_pwm/source"
@@ -312,6 +322,80 @@ def exclude_collisions(
     return joy_df
 
 
+def find_body_indices(ranges, near=0.3, edge=0.8, error=60.0):
+    """
+    いつも自車（車体・配線）が写っている、または測れていない角度のインデックスを返す
+
+    90 パーセンタイルでも near 未満の角度と、中央値が error 以上（UST-10LX は測れないと
+    65.533 を返す）の角度を芯にする。芯の周りには車体の縁がかかる角度が数点あるので、
+    芯から隣へ、90 パーセンタイルが edge 未満の間は広げる。走っている bag 全体で見るので、
+    周りの壁ではまず当たらない（芯につながっていない近い壁は広げる対象にならない）。
+    """
+    p90 = np.percentile(ranges, 90, axis=0)
+    body = (p90 < near) | (np.median(ranges, axis=0) >= error)
+    while True:
+        grown = body.copy()
+        grown[1:] |= body[:-1] & (p90[1:] < edge)
+        grown[:-1] |= body[1:] & (p90[:-1] < edge)
+        if np.array_equal(grown, body):
+            return np.flatnonzero(body)
+        body = grown
+
+
+def mirror_left_right(scan_df, joy_df, steering_center, steering_limits):
+    """
+    スキャンとステアリングを左右反転する（左右対称なもう一方のコースを走ったときのデータにする）
+
+    スキャンは前方（0 rad）を軸に反転する。自車の写り込みは車体に付いていて左右非対称なので、
+    反転してもその角度には元の値を戻す。反対側に移った写り込みは、両隣の値から線形補間する。
+    ステアリングは steering_center（まっすぐ進む PWM）を軸に折り返す。モーターはそのまま。
+    """
+    if len(scan_df) == 0:
+        return scan_df, joy_df
+
+    angle_min = scan_df["angle_min"].iloc[0]
+    angle_max = scan_df["angle_max"].iloc[0]
+    if not np.isclose(angle_min, -angle_max, atol=1e-4):
+        raise ValueError(
+            f"スキャンの角度範囲が前方に対して対称でないため反転できません: [{angle_min}, {angle_max}]"
+        )
+
+    ranges = np.stack(scan_df["ranges"].to_numpy()).astype(np.float32)
+    n = ranges.shape[1]
+    body = find_body_indices(ranges)
+    mirrored = ranges[:, ::-1].copy()
+    mirrored[:, body] = ranges[:, body]
+
+    # 反対側に移った写り込みを、両隣の値で埋める
+    gap = np.zeros(n, dtype=bool)
+    gap[n - 1 - body] = True
+    gap[body] = False
+    for run in np.split(np.flatnonzero(gap), np.flatnonzero(np.diff(np.flatnonzero(gap)) > 1) + 1):
+        if len(run) == 0:
+            continue
+        left, right = run[0] - 1, run[-1] + 1
+        if left < 0:
+            mirrored[:, run] = mirrored[:, [right]]
+        elif right >= n:
+            mirrored[:, run] = mirrored[:, [left]]
+        else:
+            w = (run - left) / (right - left)
+            mirrored[:, run] = mirrored[:, [left]] * (1 - w) + mirrored[:, [right]] * w
+
+    scan_df = scan_df.copy()
+    scan_df["ranges"] = list(mirrored)
+
+    joy_df = joy_df.copy()
+    steering = 2 * steering_center - joy_df["twist.angular.z"].to_numpy(np.float64)
+    joy_df["twist.angular.z"] = np.clip(steering, *steering_limits)
+    n_clipped = int(np.sum((steering < steering_limits[0]) | (steering > steering_limits[1])))
+    print(
+        f"  Mirrored left-right (steering center {steering_center}, body indices {len(body)}, "
+        f"interpolated {int(gap.sum())}, steering clipped {n_clipped})"
+    )
+    return scan_df, joy_df
+
+
 def preprocess_data(scan_df, joy_df, config=None):
     """
     データの前処理を実行
@@ -357,6 +441,12 @@ def preprocess_data(scan_df, joy_df, config=None):
         config.collision_margin_before,
         config.collision_margin_after,
     )
+
+    # 左右対称なもう一方のコース用に反転する
+    if config.mirror:
+        scan_df, joy_df = mirror_left_right(
+            scan_df, joy_df, config.mirror_steering_center, config.steering_limits
+        )
 
     return scan_df, joy_df
 
