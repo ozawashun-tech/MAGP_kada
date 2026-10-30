@@ -16,7 +16,8 @@ Includes PlatformIO firmware for the M5Stack side.
 | Topic | Type | Description |
 |-------|------|-------------|
 | `/bag_recorder/status` | `std_msgs/String` | JSON bag recorder status |
-| `/mux_status` | `std_msgs/String` | JSON mux mode status |
+| `/mux_pwm/status` | `std_msgs/String` | JSON mux mode status |
+| `/nn_pwm_controller/model` | `std_msgs/String` | Name of the model the inference node is using (transient_local) |
 
 #### Parameters
 
@@ -38,11 +39,13 @@ pio run -t upload
 
 | Mode | Content |
 |------|---------|
-| 0 (default) | Mux mode large display (Auto=red / Manual=blue) |
-| 1 | Bag recorder + mux mode split view |
+| 0 (default) | Mux mode large display (Auto=red / Manual=blue) and model name |
+| 1 | Bag recorder + mux mode split view (with model name) |
 | 2 | Bag recorder large display (RECORDING=red / IDLE=green) |
 
 M5Stack Core2 button controls: **BtnA** = previous mode, **BtnB** = refresh, **BtnC** = next mode.
+
+The model name is split into the name and its timestamp (`_YYYYMMDD_HHMMSS`) on two lines. It is also shown in one small line on the DRIVE standby screen.
 
 ### Setup
 
@@ -70,7 +73,8 @@ bag recorderとmuxのステータスをM5Stack Core2に表示するシリアル�
 | トピック | 型 | 説明 |
 |--------|------|------|
 | `/bag_recorder/status` | `std_msgs/String` | JSON形式のbag recorderステータス |
-| `/mux_status` | `std_msgs/String` | JSON形式のmuxモードステータス |
+| `/mux_pwm/status` | `std_msgs/String` | JSON形式のmuxモードステータス |
+| `/nn_pwm_controller/model` | `std_msgs/String` | 推論ノードが使っているモデル名（transient_local） |
 
 #### パラメータ
 
@@ -92,11 +96,13 @@ pio run -t upload
 
 | モード | 内容 |
 |------|------|
-| 0（デフォルト） | Muxモード大表示（Auto=赤 / Manual=青） |
-| 1 | bag recorder + mux 分割表示 |
+| 0（デフォルト） | Muxモード大表示（Auto=赤 / Manual=青）とモデル名 |
+| 1 | bag recorder + mux 分割表示（モデル名つき） |
 | 2 | bag recorder大表示（RECORDING=赤 / IDLE=緑） |
 
 M5Stack Core2ボタン: **BtnA**=前のモード、**BtnB**=画面リフレッシュ、**BtnC**=次のモード
+
+モデル名は、末尾の日時（`_YYYYMMDD_HHMMSS`）を分けて 2 行で出す（例: `origin_counter_clockwise` と `10/31 14:30`）。DRIVE の待機表示にも小さく 1 行で出す。
 
 ### セットアップ
 

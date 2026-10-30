@@ -47,7 +47,7 @@ ROS 2 の ament_python パッケージ群（`src/` 以下）。`urg_node2` だ�
 - `pwm_mux_node`（[src/mux_pwm/](src/mux_pwm/)）: PS ボタンで手動/自動を切り替える。自動中に L2 を押している間は、モデル出力に手動入力を加算する（シェアードコントロール）。R2 を押しながら十字キー左右で `torch_gain`（モーターのみに掛かる）、L2 を押しながらで `manual_gain` を調整する。
 - `pwm_pca9685_controller`（[src/controller/pwm_controller/](src/controller/pwm_controller/)）: `/mux_pwm` を受けて、速度リミットでクランプしてからハードウェアに出す。十字キー上下で速度リミットを変える。L1+R1 は非常停止。クランプ後の値を `/pwm_input` に出す。
 - PWM の中立・範囲・ボタン番号は `pwm_mux_node` と `pwm_pca9685_controller` の両方で `declare_parameter` されている。キャリブレーション値を変えるときは両方そろえること。
-- `bag_recorder`（ジョイスティックで記録開始・停止）と `m5stack_visualizer`（シリアル経由で M5Stack に状態表示、ファームは `platformio/`）は脇から購読するだけ。
+- `bag_recorder`（ジョイスティックで記録開始・停止）と `m5stack_visualizer`（シリアル経由で M5Stack に状態表示、ファームは `platformio/`）は脇から購読するだけ。M5Stack のブリッジは 1 行 1 JSON で送り、ファームはキー（`"state"` / `"event_type"` / `"model"` / `"mode"`）で振り分ける。ファームは Core2 用（`platformio/core2/`）と Basic 用（`platformio/src/`）の 2 つあり、変えるときは両方そろえる。
 - `bno085_imu` は PCA9685 とは別の I2C バスにつなぐ（クロックストレッチでバスが固まり、PWM 出力が止まるのを避けるため）。`rate_hz` は 50 が上限の目安。経緯は [WIP.md](WIP.md) を参照。
 
 ### 学習と推論の対応

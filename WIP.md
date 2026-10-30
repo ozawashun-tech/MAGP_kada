@@ -84,6 +84,29 @@
 4. Manual 中に PC から `make dagger c` を実行し、R1 で別の枠を選んでいても origin_clockwise に切り替わることを確かめる。
 5. 録った bag に `/nn_pwm_controller/model` が入っていることを `metadata.yaml` で確かめる。
 
+### 変更内容（段階 3）
+| ファイル | 内容 |
+|---|---|
+| `src/tools/m5stack_visualizer/m5stack_visualizer/m5stack_bridge_node.py` | `/nn_pwm_controller/model` を transient_local で購読し、`{"model": "<名前>"}` を 1 行で送る（推論ノードが 1 秒ごとに出すので、M5Stack にも 1 秒ごとに届く）。 |
+| `platformio/core2/src/main.cpp`・`platformio/src/main.cpp`（両方同じ変更） | `"model"` を含む行を `model_name` に入れ、変わったら描き直す。名前の末尾の `_YYYYMMDD_HHMMSS` を切り出し、`model :`（大きさ 1）・名前（大きさ 2、25 文字まで）・`MM/DD hh:mm`（大きさ 2）の 3 段で出す。日時の無い名前（`my_model` など）は名前だけ出す。画面 0（Mux 全画面）は y=158 から、画面 1 の DRIVE の帯は y=156 から出す。帯では Manual/Auto を大きさ 5 → 4 にして DRIVE の右（y=114）に移した。帯の描画は 2 か所に同じコードがあったので `drawDriveBand()` にまとめた。DRIVE の待機表示（`DRIVE ---`）にも、`model : <名前>` を大きさ 1 の 1 行で出す（Mux の状態が届く前でもモデルが見えるように）。 |
+| `src/tools/m5stack_visualizer/README.md` | 購読トピックの表を直し（`/mux_status` → `/mux_pwm/status`）、モデル名を足した。 |
+
+ユーザーへの提示では「`model : origin_counter_clockwise`」を 1 行にする案だったが、大きさ 2 だと 1 行 26 文字までで、`*_counter_clockwise`（24 文字）と見出しが並ばない。そのため、見出しを小さく上に置いた。
+
+### 確認状況（段階 3、PC）
+- [x] M5Stack・Arduino の `String`・ArduinoJson をまねたヘッダーで、両方の `main.cpp` を g++ でコンパイルし、メッセージを流して描画の座標を書き出した。
+  - 最長の `mirror_counter_clockwise` で x=10〜298 に収まる。
+  - 日時は `10/31 14:30` の形になる。
+  - 同じ名前が続いても描き直さない。
+  - 待機表示の 1 行（最長 48 文字）は x=16〜304 で、枠（x=10〜310）の中に収まる。
+- [ ] PlatformIO でのビルドと書き込み（この PC に PlatformIO が無い）。
+- 既知（前から）: Core2 版は、Mux の状態を受けてから 3 秒で DRIVE を待機表示に戻す（`isMuxTimeout`）。`pwm_mux_node` は状態を切り替えたときにしか出さないので、Manual/Auto の表示は 3 秒で消える。モデル名は待機表示にも出るので消えない。今回は変えない（ユーザー判断）。
+
+### TODO（実機、段階 3）
+1. `cd src/tools/m5stack_visualizer/platformio/core2 && pio run -t upload`（Basic は `platformio/` で）。
+2. `make build` → `make run` で、画面 0・画面 1 にモデル名と日時が出ることを確かめる。R1 で切り替えるたびに変わることも確かめる。
+3. 文字の重なり・帯からのはみ出しを目で確かめる（座標は計算上のもの）。
+
 ---
 
 ## 2026-10-30 — 左右反転したデータで学習するモデル（branch: `mirror`）

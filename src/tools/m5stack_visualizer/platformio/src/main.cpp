@@ -36,6 +36,9 @@ BagRecorderStatus prev_bag_status;
 BagRecorderEvent last_event;
 MuxInputStatus mux_status;
 MuxInputStatus prev_mux_status;
+// 推論ノードが使っているモデル名（/nn_pwm_controller/model、例: origin_clockwise_20261031_143012）
+String model_name = "";
+String prev_model_name = "";
 unsigned long last_receive_time = 0;
 unsigned long bag_last_update = 0;
 unsigned long mux_last_update = 0;
@@ -60,6 +63,7 @@ DisplayMode prev_mode = MODE_MUX_ONLY;
 void parseStatusMessage(String json_str);
 void parseEventMessage(String json_str);
 void parseMuxMessage(String json_str);
+void parseModelMessage(String json_str);
 void updateDisplay();
 void drawModeIndicator();
 void drawBagRecorderLarge();
@@ -67,6 +71,9 @@ void drawBagAndMux();
 void drawMuxOnlyLarge();
 void drawInitialScreen();
 void drawStandbyArea(int x, int y, int w, int h, String title);
+void drawModelName(int y);
+void drawDriveBand();
+bool isDigits(String s);
 uint16_t getStateColor(String state);
 uint16_t getMuxColor(String mode);
 void handleButtonPress();
@@ -95,8 +102,12 @@ void loop() {
             
             prev_bag_status = bag_status;
             prev_mux_status = mux_status;
+            prev_model_name = model_name;
             
-            if (line.indexOf("\"state\"") != -1) {
+            if (line.indexOf("\"model\"") != -1) {
+                // {"model": <名前>}（"model" は "mode" とは別の文字列）
+                parseModelMessage(line);
+            } else if (line.indexOf("\"state\"") != -1) {
                 parseStatusMessage(line);
                 bag_last_update = millis();
                 bag_data_received = true;
@@ -161,6 +172,11 @@ void drawStandbyArea(int x, int y, int w, int h, String title) {
     M5.Lcd.setTextSize(1);
     M5.Lcd.setCursor(x + w/2 - 10, y + h/2 - 5);
     M5.Lcd.println("---");
+    
+    if (title == "DRIVE" && model_name.length() > 0) {
+        M5.Lcd.setCursor(x + 6, y + h - 20);
+        M5.Lcd.print("model : " + model_name);
+    }
 }
 
 void drawInitialScreen() {
@@ -203,6 +219,10 @@ bool hasDataChanged() {
         return true;
     }
     
+    if (model_name != prev_model_name) {
+        return true;
+    }
+    
     if (current_mode != prev_mode) {
         prev_mode = current_mode;
         return true;
@@ -242,6 +262,15 @@ void parseMuxMessage(String json_str) {
     if (!error) {
         mux_status.mode = doc["mode"].as<String>();
         mux_status.last_update = millis();
+    }
+}
+
+void parseModelMessage(String json_str) {
+    StaticJsonDocument<256> doc;
+    DeserializationError error = deserializeJson(doc, json_str);
+    
+    if (!error) {
+        model_name = doc["model"].as<String>();
     }
 }
 
@@ -381,20 +410,7 @@ void drawBagAndMux() {
     if (bag_timeout && !mux_timeout) {
         drawStandbyArea(10, 10, 300, 95, "RECORDER");
         
-        uint16_t mux_color = getMuxColor(mux_status.mode);
-        M5.Lcd.fillRect(0, 108, 320, 107, mux_color);
-        M5.Lcd.setTextSize(2);
-        M5.Lcd.setTextColor(TFT_WHITE);
-        M5.Lcd.setCursor(10, 120);
-        M5.Lcd.println("DRIVE");
-        M5.Lcd.fillTriangle(250, 120, 280, 135, 250, 150, TFT_WHITE);
-        M5.Lcd.fillTriangle(260, 125, 260, 145, 240, 135, TFT_WHITE);
-        M5.Lcd.setTextSize(5);
-        int mux_x = (320 - mux_status.mode.length() * 30) / 2;
-        M5.Lcd.setCursor(mux_x, 155);
-        M5.Lcd.println(mux_status.mode);
-        M5.Lcd.setCursor(mux_x+1, 155);
-        M5.Lcd.println(mux_status.mode);
+        drawDriveBand();
         return;
     }
     
@@ -445,20 +461,7 @@ void drawBagAndMux() {
         M5.Lcd.print(bag_status.bag_counter);
     }
     
-    uint16_t mux_color = getMuxColor(mux_status.mode);
-    M5.Lcd.fillRect(0, 108, 320, 107, mux_color);
-    M5.Lcd.setTextSize(2);
-    M5.Lcd.setTextColor(TFT_WHITE);
-    M5.Lcd.setCursor(10, 120);
-    M5.Lcd.println("DRIVE");
-    M5.Lcd.fillTriangle(250, 120, 280, 135, 250, 150, TFT_WHITE);
-    M5.Lcd.fillTriangle(260, 125, 260, 145, 240, 135, TFT_WHITE);
-    M5.Lcd.setTextSize(5);
-    int mux_x = (320 - mux_status.mode.length() * 30) / 2;
-    M5.Lcd.setCursor(mux_x, 155);
-    M5.Lcd.println(mux_status.mode);
-    M5.Lcd.setCursor(mux_x+1, 155);
-    M5.Lcd.println(mux_status.mode);
+    drawDriveBand();
 }
 
 void drawMuxOnlyLarge() {
@@ -482,6 +485,63 @@ void drawMuxOnlyLarge() {
     M5.Lcd.println(mux_status.mode);
     M5.Lcd.setCursor(x+1, 100);
     M5.Lcd.println(mux_status.mode);
+    
+    drawModelName(158);
+}
+
+bool isDigits(String s) {
+    for (int i = 0; i < s.length(); i++) {
+        if (!isDigit(s.charAt(i))) {
+            return false;
+        }
+    }
+    return s.length() > 0;
+}
+
+// モデル名を出す（Manual・Auto どちらでも）。末尾の _YYYYMMDD_HHMMSS は日時として別の行に出す
+// 例: origin_counter_clockwise_20261031_143012 → "origin_counter_clockwise" と "10/31 14:30"
+void drawModelName(int y) {
+    String name = model_name.length() > 0 ? model_name : "---";
+    String stamp = "";
+    int n = name.length();
+    if (n > 16 && name.charAt(n - 16) == '_' && name.charAt(n - 7) == '_' &&
+        isDigits(name.substring(n - 15, n - 7)) && isDigits(name.substring(n - 6))) {
+        stamp = name.substring(n - 11, n - 9) + "/" + name.substring(n - 9, n - 7) + " " +
+                name.substring(n - 6, n - 4) + ":" + name.substring(n - 4, n - 2);
+        name = name.substring(0, n - 16);
+    }
+    
+    M5.Lcd.setTextColor(TFT_WHITE);
+    M5.Lcd.setTextSize(1);
+    M5.Lcd.setCursor(10, y);
+    M5.Lcd.print("model :");
+    // 大きさ 2 で 1 行に入るのは 25 文字まで（origin_counter_clockwise は 24 文字）
+    M5.Lcd.setTextSize(2);
+    M5.Lcd.setCursor(10, y + 11);
+    M5.Lcd.print(name.substring(0, 25));
+    if (stamp.length() > 0) {
+        M5.Lcd.setCursor(10, y + 30);
+        M5.Lcd.print(stamp);
+    }
+}
+
+// DRIVE の帯（RECORDER と並べる画面の下半分）。モードを DRIVE の右に置き、下にモデル名を出す
+void drawDriveBand() {
+    uint16_t mux_color = getMuxColor(mux_status.mode);
+    M5.Lcd.fillRect(0, 108, 320, 107, mux_color);
+    M5.Lcd.setTextSize(2);
+    M5.Lcd.setTextColor(TFT_WHITE);
+    M5.Lcd.setCursor(10, 120);
+    M5.Lcd.println("DRIVE");
+    M5.Lcd.fillTriangle(250, 120, 280, 135, 250, 150, TFT_WHITE);
+    M5.Lcd.fillTriangle(260, 125, 260, 145, 240, 135, TFT_WHITE);
+    M5.Lcd.setTextSize(4);
+    M5.Lcd.setCursor(80, 114);
+    M5.Lcd.println(mux_status.mode);
+    M5.Lcd.setCursor(81, 114);
+    M5.Lcd.println(mux_status.mode);
+    
+    drawModelName(156);
 }
 
 uint16_t getStateColor(String state) {

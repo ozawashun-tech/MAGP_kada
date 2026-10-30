@@ -2,6 +2,7 @@
 
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, QoSProfile
 from std_msgs.msg import String
 import serial
 import json
@@ -53,6 +54,14 @@ class M5StackBridgeNode(Node):
             10
         )
         
+        # 推論ノードが使っているモデル名（transient_local なので、あとから起動しても最後の名前が届く）
+        self.model_sub = self.create_subscription(
+            String,
+            '/nn_pwm_controller/model',
+            self.model_callback,
+            QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
+        )
+        
         self.get_logger().info('M5Stack Bridge Node started')
     
     def status_callback(self, msg):
@@ -90,6 +99,15 @@ class M5StackBridgeNode(Node):
                 
                 self.serial_port.write((json_str + '\n').encode())
                 self.get_logger().debug('Sent mux status to M5Stack')
+            except Exception as e:
+                self.get_logger().error(f'Serial write error: {str(e)}')
+    
+    def model_callback(self, msg):
+        """モデル名を {"model": <名前>} で転送"""
+        if self.serial_port and self.serial_port.is_open:
+            try:
+                self.serial_port.write((json.dumps({'model': msg.data}) + '\n').encode())
+                self.get_logger().debug('Sent model name to M5Stack')
             except Exception as e:
                 self.get_logger().error(f'Serial write error: {str(e)}')
     
