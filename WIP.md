@@ -58,6 +58,32 @@
 4. 注意: 走る向きを変える前に、必ずその向きで `make dagger` を実行しておく。前回の dagger の後に録った bag は、すべて次に指定した向きとして足される。間違えたら session.txt の向きを手で直す。
 5. 10/30 までの session.txt には向きが書かれていない。続けて使うなら、各行に `c` を書き足す（10/30 のコースは右回り = 時計回り）。
 
+### 変更内容（段階 2）
+| ファイル | 内容 |
+|---|---|
+| `src/pytorch_pwm_controller/pytorch_pwm_controller/nn_pwm_controller_node.py` | 使うモデルを `selected_path`（枠のリンクか `model_path`）で持つ。起動時と、`current.pth` の（行き先, 実体, 更新時刻）が変わったとき（deploy・rollback・new-session）は、`current.pth` が指す枠を選ぶ。R1 で別の枠を選んでいても、同じ枠への deploy で `current.pth` の実体が変わるので、送った枠に切り替わる。`/joy` を購読し、R1 を離したとき、押している間に L1 が押されていなければ、リンクがある次の枠を選んで読み込む（Auto 中は無視）。枠が無ければログだけ出す。読み込めなかった枠は、前のモデルのまま走る（今までの再読み込みと同じ）。読み込んでいるモデル名を `/nn_pwm_controller/model`（`std_msgs/String`、transient_local）に、読み込みのたびと 1 秒ごとに出す。パラメータ `slot_names` / `joy_topic` / `l1_button_index`（4）/ `r1_button_index`（5）/ `model_name_topic` を追加。 |
+| `launch/autonomous_driving.py` | コメントのみ（パラメータは既定値のまま）。 |
+| `src/tools/bag_recorder/config/bag_recorder_params.yaml` | `/nn_pwm_controller/model` も記録する（どのモデルで走った bag か分かるように）。`dataset.py` は読まない。 |
+
+### 確認状況（段階 2、PC）
+- [x] rclpy・Model を差し替えた仮の環境で、段階 1 の deploy / rollback / new-session のスクリプトで作ったリンクの上でノードを動かした。
+  - 今までの `current.pth` → 実体の形で起動できる。
+  - deploy・rollback で、送った枠に切り替わる。R1 で別の枠を選んでいた場合も同じ。
+  - R1 で、リンクがある枠だけを順に回る（最後の次は最初に戻る）。
+  - L1+R1、L1 を押してから R1、Auto 中の R1 では切り替わらない。
+  - Auto 中の deploy は Manual に戻ってから読み込む。
+  - 読み込めない枠では、前のモデルを使い続ける。
+  - new-session の後は `current.pth` の実体で走り、R1 では何もしない。
+  - 配信する名前は、読み込んだモデルと一致する。
+- [ ] ROS 2 上での動作（この PC に ROS 2 が無い）。
+
+### TODO（実機、段階 2）
+1. `make build` のあと `make run` し、`ros2 topic echo /nn_pwm_controller/model` で名前が出ることを確かめる。
+2. Manual で R1 を押して離すたびに、枠が順に変わることを確かめる（ログ `Model slot selected:` / `Model reloaded:`）。読み込みの間（Jetson で約 1 秒？）は推論が止まるが、Manual なので走行には影響しない。
+3. L1+R1 の非常停止で枠が変わらないこと、Auto 中の R1 で変わらないことを確かめる。
+4. Manual 中に PC から `make dagger c` を実行し、R1 で別の枠を選んでいても origin_clockwise に切り替わることを確かめる。
+5. 録った bag に `/nn_pwm_controller/model` が入っていることを `metadata.yaml` で確かめる。
+
 ---
 
 ## 2026-10-30 — 左右反転したデータで学習するモデル（branch: `mirror`）
