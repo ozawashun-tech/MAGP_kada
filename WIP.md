@@ -4,6 +4,62 @@
 
 ---
 
+## 2026-10-31 — 向きごとのモデルの枠と、R1 での切り替え（branch: `model-slots`）
+
+### 目的
+本番では時計回り・反時計回りのどちらのコースを走るかが、その場で決まる。1 セッションで次の 4 つのモデルを持ち、実機で Manual 中に R1 で切り替えられるようにする。使っているモデル名は M5Stack に出す。
+
+| 指定 | 学習に使う bag | 枠（Jetson の `<枠>.pth`） |
+|---|---|---|
+| `make dagger c` | c の bag（新しい bag は c として足す） | `origin_clockwise` |
+| `make dagger cc` | cc の bag（新しい bag は cc として足す） | `origin_counter_clockwise` |
+| `make mirror c` | c の bag を反転（新しい bag は足さない） | `mirror_counter_clockwise` |
+| `make mirror cc` | cc の bag を反転（新しい bag は足さない） | `mirror_clockwise` |
+
+段階を分けて進める。
+
+1. 学習・deploy（この節）
+2. 推論ノードで R1 による切り替えと、モデル名の配信
+3. M5Stack への表示
+
+今は L2 補正を mirror のモデルには掛けない方針。
+
+### 変更内容（段階 1）
+| ファイル | 内容 |
+|---|---|
+| `Makefile` | `make dagger c|cc` / `make mirror c|cc` / `make rollback c|cc` で向きを受け取る（`MAKECMDGOALS` から拾い、`c` / `cc` は何もしないターゲット）。向きが無ければエラーで止まる。 |
+| `training_src/jetson_sync.py` | session.txt の各行に向きを書く（`rosbag2_<日時> c`）。`sync_session(direction)` は、新しい bag をその向きとして書き足し、その向きの bag だけを返す。向きの無い行は警告を出して使わない。`deploy_model(path, slot)` は、`<枠>.pth` → 実体、`current.pth` → `<枠>.pth` に付け替える。origin の枠だけ、前の行き先を `<枠>.prev.pth` に残す。`rollback_model(direction)` は origin の枠と `.prev` を入れ替え、`current.pth` をその枠にする。`new_session()` は、`current.pth` が枠を指していれば実体に張り替えてから、枠と `.prev` のリンクを消す（ファイルは消さない）。`previous.pth` は今後更新しない。 |
+| `training_src/train.py` | `--direction c|cc` を追加（`--session` で必須）。`--session` で学習したモデルは `<枠>_<日時>.pth` に保存する。`--deploy` は `--session` と一緒のときだけ使える。 |
+
+推論ノードは `current.pth` の実体（`realpath`）が変われば読み込み直すので、段階 1 だけでも、deploy したモデルに Manual 中に切り替わる。
+
+### 確認状況（PC）
+- [x] `make -n` で、`dagger` / `mirror` / `rollback` に `c` / `cc` が渡ることを確認した。向きが無いとき、2 つ書いたときはエラーで止まる。
+- [x] Jetson の一覧を差し替えて `sync_session` を確かめた。
+  - 新しい bag はその向きで書き足される。
+  - mirror（`add_new=False`）は書き足さない。
+  - 向きの違う bag は使わない。
+  - 向きの無い行は警告して使わない。
+  - `#` を消して向きを書いた旧 bag は使う。
+  - 新しいセッションで、その向きの bag が無ければエラーになる。
+- [x] deploy / rollback / new-session のスクリプトを、ローカルのディレクトリで `bash` で実行し、リンクを確かめた。
+  - 今までの形（`current.pth` → 実体）から deploy できる。
+  - 同じ名前のモデルは上書きせずに止まる。
+  - mirror の枠は `.prev` を作らない。
+  - rollback は 2 回で元に戻る。`.prev` が無ければ止まる。
+  - new-session の後も `current.pth` は同じ実体を指す。
+- [x] `train.py` の引数のチェック（`--direction` なし、`--session` なしの `--deploy`、不正な向き）。
+- [ ] 実際の学習は、この PC に学習環境が無いので試していない。
+
+### TODO（実機）
+1. `make new-session` → c で bag を録る → `make dagger c` を実行する。`ls -l /home/jetson/models` で `origin_clockwise.pth` と `current.pth` を見る。推論ノードのログ `Model reloaded: .../origin_clockwise_<日時>.pth` も確かめる。
+2. `make mirror c` で `mirror_counter_clockwise.pth` ができ、`current.pth` が付け替わることを確かめる。
+3. `make rollback c` を確かめる（2 回目の `make dagger c` の後）。
+4. 注意: 走る向きを変える前に、必ずその向きで `make dagger` を実行しておく。前回の dagger の後に録った bag は、すべて次に指定した向きとして足される。間違えたら session.txt の向きを手で直す。
+5. 10/30 までの session.txt には向きが書かれていない。続けて使うなら、各行に `c` を書き足す（10/30 のコースは右回り = 時計回り）。
+
+---
+
 ## 2026-10-30 — 左右反転したデータで学習するモデル（branch: `mirror`）
 
 ### 目的

@@ -7,7 +7,7 @@ from dataset import (
     RosbagDataset,
     load_rosbags,
 )
-from jetson_sync import deploy_model, fetch_latest_bags, sync_session
+from jetson_sync import DIRECTIONS, deploy_model, fetch_latest_bags, slot_name, sync_session
 from model import DNN
 from torch.utils.data import random_split
 from datetime import datetime
@@ -449,13 +449,18 @@ if __name__ == "__main__":
     parser.add_argument(
         "--session",
         action="store_true",
-        help="dataset/train/session.txt の bag で学習する（Jetson の新しい bag を自動で書き足す）。"
-        "指定しなければ Jetson の最新の bag 1 本で学習する",
+        help="dataset/train/session.txt の、向きが --direction の bag で学習する"
+        "（Jetson の新しい bag をその向きとして自動で書き足す）。指定しなければ Jetson の最新の bag 1 本で学習する",
+    )
+    parser.add_argument(
+        "--direction",
+        choices=list(DIRECTIONS),
+        help="--session で使う bag の向き（c: 時計回り / cc: 反時計回り）。モデルの枠の名前もこれで決まる",
     )
     parser.add_argument(
         "--deploy",
         action="store_true",
-        help="学習したモデルを Jetson に送り、current.pth をそれに付け替える",
+        help="学習したモデルを Jetson に送り、枠（origin_clockwise.pth など）と current.pth を付け替える（--session が必要）",
     )
     parser.add_argument(
         "--mirror",
@@ -468,14 +473,19 @@ if __name__ == "__main__":
         help="学習に使う bag を直接指定する（dataset/train/ からの名前かパス）。Jetson には接続しない",
     )
     args = parser.parse_args()
+    use_session = args.session and not args.bags
+    if use_session and args.direction is None:
+        parser.error("--session には --direction c か --direction cc が必要です")
+    if args.deploy and not use_session:
+        parser.error("--deploy は --session と一緒に使います（送り先の枠が決まらないため）")
 
     if args.bags:
         train_dir = Path(__file__).resolve().parent.parent / "dataset" / "train"
         bag_paths = [Path(b) if Path(b).exists() else train_dir / b for b in args.bags]
     elif args.session:
-        # 反転モデルは、今のセッションの bag（元のコース）だけで作る。新しい bag は
+        # 反転モデルは、その向きで録った bag だけで作る。新しい bag は
         # 反転したコースで録ったものかもしれないので、書き足さない
-        bag_paths = sync_session(add_new=not args.mirror)
+        bag_paths = sync_session(args.direction, add_new=not args.mirror)
     else:
         bag_paths = fetch_latest_bags()
     print("\nBags used for training:")
@@ -484,7 +494,12 @@ if __name__ == "__main__":
 
     # 既存のモデルを上書きしないよう、学習した日時をファイル名に入れる
     model_dir = Path(__file__).resolve().parent.parent / "model" / "transformer"
-    prefix = "my_model_mirror" if args.mirror else "my_model"
+    if use_session:
+        slot = slot_name(args.direction, args.mirror)
+        prefix = slot
+        print(f"Model slot: {slot}")
+    else:
+        prefix = "my_model_mirror" if args.mirror else "my_model"
     model_save_path = model_dir / f"{prefix}_{datetime.now():%Y%m%d_%H%M%S}.pth"
 
     train_model(
@@ -508,4 +523,4 @@ if __name__ == "__main__":
     )
 
     if args.deploy:
-        deploy_model(model_save_path)
+        deploy_model(model_save_path, slot)
