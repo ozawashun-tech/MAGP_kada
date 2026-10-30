@@ -473,7 +473,9 @@ if __name__ == "__main__":
         train_dir = Path(__file__).resolve().parent.parent / "dataset" / "train"
         bag_paths = [Path(b) if Path(b).exists() else train_dir / b for b in args.bags]
     elif args.session:
-        bag_paths = sync_session()
+        # 反転モデルは、今のセッションの bag（元のコース）だけで作る。新しい bag は
+        # 反転したコースで録ったものかもしれないので、書き足さない
+        bag_paths = sync_session(add_new=not args.mirror)
     else:
         bag_paths = fetch_latest_bags()
     print("\nBags used for training:")

@@ -22,6 +22,7 @@ cd training_src && python3 train.py  # 学習（パラメータは train.py 末�
 make new-session               # コースや走る向きが変わったとき。今 Jetson にある bag は学習に使わない
 make dagger                    # 新しい bag をセッションに足して学習し、Jetson の current.pth を付け替える
 make rollback                  # current.pth を 1 つ前のモデルに戻す（もう一度で元に戻る）
+make mirror                    # 今のセッションの bag を左右反転して学習し、付け替える（新しい bag は足さない）
 ```
 
 - `requirements.txt` には torch を入れない。PC と Jetson で wheel が違うため、`setup.sh` が環境を判別して入れる（Jetson は jetson-ai-lab の index を使う。公式 PyPI 版では GPU が使えない）。

@@ -160,9 +160,13 @@ def new_session():
     print(f"New session: {SESSION_FILE}（既存の bag {len(remote_bags)} 本は使わない）")
 
 
-def sync_session():
+def sync_session(add_new=True):
     """
     Jetson の新しい bag を session.txt に書き足し、使う bag をすべて取ってきてパスを返す
+
+    Args:
+        add_new: False なら新しい bag を書き足さず、session.txt にある bag だけを使う
+            （反転モデルを作るとき。反転したコースで録った bag を混ぜないため）
 
     Returns:
         list of Path: ローカルの bag ディレクトリのパス（session.txt の順）
@@ -176,7 +180,9 @@ def sync_session():
 
     used, known = _read_session()
     new_bags = [name for name in remote_bags if name not in known]
-    if new_bags:
+    if new_bags and not add_new:
+        print(f"Not added to session (add_new=False): {', '.join(new_bags)}")
+    elif new_bags:
         with SESSION_FILE.open("a") as f:
             f.write(f"# {datetime.now():%Y-%m-%d %H:%M} に追加\n")
             f.writelines(f"{name}\n" for name in new_bags)

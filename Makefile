@@ -1,4 +1,4 @@
-.PHONY: clean build cache-clean run dagger new-session rollback help
+.PHONY: clean build cache-clean run dagger mirror new-session rollback help
 
 # デフォルトターゲット
 .DEFAULT_GOAL := help
@@ -31,6 +31,11 @@ PYTHON ?= python3
 dagger:
 	cd training_src && $(PYTHON) train.py --session --deploy
 
+# 今のセッションの bag（元のコース）を左右反転して学習し、Jetson の current.pth を付け替える
+# Jetson の新しい bag はセッションに足さない（反転したコースで録った bag を混ぜないため）
+mirror:
+	cd training_src && $(PYTHON) train.py --session --mirror --deploy
+
 # コースや走る向きが変わったら実行する（今 Jetson にある bag は学習に使わない）
 new-session:
 	cd training_src && $(PYTHON) jetson_sync.py new-session
@@ -47,6 +52,7 @@ help:
 	@echo "  make cache-clean   - Clean CMake cache and build"
 	@echo "  make run           - Source setup and launch autonomous_driving.py"
 	@echo "  make dagger        - [PC] Sync session bags, train, and deploy to Jetson"
+	@echo "  make mirror        - [PC] Train a left-right mirrored model from session bags and deploy"
 	@echo "  make new-session   - [PC] Start a new bag session (course or direction changed)"
 	@echo "  make rollback      - [PC] Swap Jetson current.pth and previous.pth"
 	@echo "  make help          - Show this help message"
