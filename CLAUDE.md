@@ -68,8 +68,8 @@ ROS 2 の ament_python パッケージ群（`src/` 以下）。`urg_node2` だ�
 
 ### 現行モデルの保護と IMU 実験（進行中）
 
-- 既存の `.pth`（`model/`、パッケージ内の `model/`、`/home/jetson/models/`）は削除・上書きしない。
-- `train.py` は実行するたびに `model/checkpoints/best_model.pth`・`epoch_*.pth` を上書きする。学習したモデルは `model/transformer/my_model_<日時>.pth` に保存する。
+- 既存の `.pth`（`model/`、パッケージ内の `model/`、`/home/jetson/models/`）は削除・上書きしない。ただし `model/checkpoints/` は除く。
+- `train.py` は実行するたびに `model/checkpoints/best_model.pth`・`epoch_*.pth` を上書きする。作業用なので git では管理しない（`.gitignore`）。学習したモデルは `model/transformer/my_model_<日時>.pth` に保存する。
 - IMU を取り入れた模倣学習を、現行の LiDAR のみの系統とは別に開発している。関連する作業では `imu-imitation-learning` スキル（[.claude/skills/imu-imitation-learning/SKILL.md](.claude/skills/imu-imitation-learning/SKILL.md)）に従う。
 - 2026-10-18 時点の既存の bag には `/imu/data` が入っていない。`/pwm_input` しかない bag もあるので、学習に使う前に `metadata.yaml` でトピックを確認する。
 

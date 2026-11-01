@@ -23,3 +23,5 @@ __pycache__/
 .vscode
 # 学習に使う bag の一覧（make new-session / make dagger が更新する）
 dataset/train/session*.txt
+# train.py が学習のたびに上書きするチェックポイント（作業用）
+model/checkpoints/
