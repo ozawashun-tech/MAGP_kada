@@ -217,7 +217,7 @@ def new_session():
         "# 学習に使う bag の一覧。行頭に # を付けた bag は使わない",
         "# bag 名のあとに走ったコース（待機場所から見て left: 左 / right: 右）を書く。make dagger left / right が書き足す",
         "# 3 つ目の mirror は、そのコースで mirror の枠を走らせて録った bag（make dagger-mirror left / right が書き足す）。",
-        "# 反対のコースの bag と一緒に、反対のコースの origin と、そのコースの mirror の学習に使う",
+        "# その mirror の枠の学習にだけ使う（反対のコースの origin には入れない）",
         "# 以下はセッション開始前の bag（使うときは # を消し、コースを書く）",
     ]
     lines += [f"# {name}" for name in remote_bags]
@@ -231,8 +231,9 @@ def sync_session(course, add_new=True, mirror_run=False):
     Jetson の新しい bag を session.txt に書き足し、origin_<course> と対の mirror の学習に使う bag を
     取ってきて返す
 
-    使うのは、コースが course の bag と、反対のコースで mirror の枠（mirror_<反対のコース>）を
-    走らせて録った bag（session.txt で「<反対のコース> mirror」）。後者は origin の学習では反転して使う
+    返すのは、コースが course の bag と、反対のコースで mirror の枠（mirror_<反対のコース>）を
+    走らせて録った bag（session.txt で「<反対のコース> mirror」）。後者は mirror の学習にだけ使う
+    （どちらに使うかは train.py が決める）
 
     Args:
         course: "left"（左）か "right"（右）。origin の枠のコース

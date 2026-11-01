@@ -488,8 +488,8 @@ if __name__ == "__main__":
         "--mirror-run",
         action="store_true",
         help="Jetson の新しい bag は、--course のコースで mirror_<コース> の枠を走らせて録ったもの"
-        "（session.txt に「<コース> mirror」と書き足す）。その mirror の枠と、対の origin_<反対のコース> を学習し、"
-        "mirror の枠を先に送って車もそちらにする（--session が必要）",
+        "（session.txt に「<コース> mirror」と書き足す）。その mirror の枠だけを学習して送り、車もそちらにする"
+        "（対の origin_<反対のコース> には入れない。--session が必要）",
     )
     parser.add_argument(
         "--bags",
@@ -508,8 +508,8 @@ if __name__ == "__main__":
     # 学習する origin の枠のコース。mirror_<コース> で走ったなら、対の origin は反対のコース
     origin_course = opposite(args.course) if args.mirror_run else args.course
 
-    # (bag のパス, mirror で走って録った bag か)。mirror で走った bag は反対のコースのものなので、
-    # origin の学習では反転し、mirror の学習ではそのまま使う
+    # (bag のパス, mirror で走って録った bag か)。mirror で走った bag は、その mirror の枠の学習にだけ
+    # そのまま使う（origin は、そのコースを origin で走った bag だけで作る）
     if args.bags:
         train_dir = Path(__file__).resolve().parent.parent / "dataset" / "train"
         bags = [(Path(b) if Path(b).exists() else train_dir / b, False) for b in args.bags]
@@ -520,7 +520,7 @@ if __name__ == "__main__":
         bags = [(path, False) for path in fetch_latest_bags()]
     print("\nBags used for training:")
     for path, mirror_run in bags:
-        print(f"  {path.name}{'（mirror で走った bag。origin では反転する）' if mirror_run else ''}")
+        print(f"  {path.name}{'（mirror で走った bag。mirror の学習にだけ使う）' if mirror_run else ''}")
 
     def train_and_save(mirror):
         """bags で学習して保存し、(保存先, 枠) を返す（--session でなければ枠は None）"""
@@ -535,9 +535,13 @@ if __name__ == "__main__":
             prefix = "my_model_mirror" if mirror else "my_model"
         model_save_path = model_dir / f"{prefix}_{datetime.now():%Y%m%d_%H%M%S}.pth"
 
-        bag_mirrors = [mirror != mirror_run for _, mirror_run in bags]
+        # origin は mirror で走った bag を使わない。mirror は origin で走った bag だけを反転する
+        model_bags = [(path, mirror_run) for path, mirror_run in bags if mirror or not mirror_run]
+        if not model_bags:
+            raise FileNotFoundError(f"{slot or prefix} の学習に使う bag がありません（mirror で走った bag は origin には使いません）")
+        bag_mirrors = [mirror and not mirror_run for _, mirror_run in model_bags]
         train_model(
-            bag_paths=[path for path, _ in bags],
+            bag_paths=[path for path, _ in model_bags],
             model_save_path=str(model_save_path),
             # launch/autonomous_driving.py の推論ノードと合わせる
             scan_history_length=20,
@@ -557,10 +561,11 @@ if __name__ == "__main__":
         )
         return model_save_path, slot
 
-    # 今走っているコースの枠（mirror で走ったなら mirror）を先に学習して送り、車もそちらにする。
-    # 対の枠はそのあとに作り直し、current.pth は付け替えない（途中で Ctrl+C で止めても、先に送ったモデルは使える）
+    # 今走っているコースの枠を先に学習して送り、車もそちらにする。--with-mirror の mirror の枠はそのあとに
+    # 作り直し、current.pth は付け替えない（途中で Ctrl+C で止めても、先に送ったモデルは使える）
+    # mirror で走った bag は mirror の枠にしか入らないので、--mirror-run は mirror の枠だけを作る
     if args.mirror_run:
-        mirrors = [True, False]
+        mirrors = [True]
     else:
         mirrors = [args.mirror] + ([True] if args.with_mirror else [])
     for i, mirror in enumerate(mirrors):

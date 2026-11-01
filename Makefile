@@ -39,8 +39,7 @@ dagger:
 	cd training_src && $(PYTHON) train.py --session --course $(COURSE) --deploy --with-mirror
 
 # そのコースで mirror_<コース> の枠を走らせて録った bag を「<コース> mirror」としてセッションに足し、
-# mirror_<コース> と、対の origin_<反対のコース> を学習する（L2 補正が両方に入る）
-# mirror の枠を先に送って current.pth もそちらにし、origin はあとから送る（current.pth は mirror のまま）
+# mirror_<コース> だけを学習して送り、current.pth もそちらにする（対の origin_<反対のコース> には入れない）
 dagger-mirror:
 	$(REQUIRE_COURSE)
 	cd training_src && $(PYTHON) train.py --session --course $(COURSE) --deploy --mirror-run
@@ -72,7 +71,7 @@ help:
 	@echo "  make cache-clean   - Clean CMake cache and build"
 	@echo "  make run           - Source setup and launch autonomous_driving.py"
 	@echo "  make dagger left|right        - [PC] Add new bags as left/right, train origin_<course> and mirror_<opposite>, and deploy to Jetson"
-	@echo "  make dagger-mirror left|right - [PC] Add new bags recorded with mirror_<course>, train mirror_<course> and origin_<opposite>, and deploy"
+	@echo "  make dagger-mirror left|right - [PC] Add new bags recorded with mirror_<course>, train only mirror_<course>, and deploy"
 	@echo "  make mirror left|right        - [PC] Train mirror_<opposite> from left/right bags and deploy"
 	@echo "  make new-session   - [PC] Start a new bag session and clear the model slots on Jetson"
 	@echo "  make rollback left|right      - [PC] Swap Jetson origin_<course>.pth and origin_<course>.prev.pth"

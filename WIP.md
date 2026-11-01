@@ -4,6 +4,32 @@
 
 ---
 
+## 2026-11-01 — mirror で直した bag は、その mirror の枠にだけ入れる（branch: `model-slots`）
+
+### 目的
+`mirror_right` で L2 補正した bag（`right mirror`）を、`mirror_right` の学習にだけ使う（ユーザーの判断）。少し前の節で、反転して `origin_left` にも入れるようにしたが、それをやめる。origin は、そのコースを origin で走った bag だけで作る。
+
+| bag | `origin_left` | `mirror_right` |
+|---|---|---|
+| `left`（左を origin で走った） | そのまま | 反転 |
+| `right mirror`（右を `mirror_right` で走った） | **使わない**（前は反転して使っていた） | そのまま |
+
+### 変更内容
+| ファイル | 内容 |
+|---|---|
+| `training_src/train.py` | `train_and_save(mirror)` で、origin を学習するときは mirror で走った bag を除く。mirror を学習するときは、origin で走った bag だけを反転する。使う bag が無ければ止める。`--mirror-run` は mirror の枠だけを学習して送る（前は mirror → origin の 2 回）。 |
+| `training_src/jetson_sync.py` | `sync_session()` の説明と、`new_session()` が書く session.txt の見出しを直した（返す bag は前と同じ）。 |
+| `Makefile`・`操作説明.md`・`CLAUDE.md` | `dagger-mirror` の説明を直した。 |
+| PC の `dataset/train/session.txt`（git 管理外） | 見出しの説明の 1 行を直した。 |
+
+### 確認状況（PC）
+- [x] `py_compile` が通る。
+- [x] 学習・送信を差し替えたテストで、`dagger-mirror right` は `mirror_right` だけを（left の bag は反転、`right mirror` の bag はそのまま）学習して送り、`current.pth` を付け替える。`dagger left` は `origin_left` を left の bag だけで、`mirror_right` を left（反転）と `right mirror`（そのまま）で学習する。`mirror left` も同じ bag で `mirror_right` を作る。
+- [x] mirror で走った bag しか無いときに `make dagger left` を実行すると、「origin_left の学習に使う bag がありません」で止まる。
+- [ ] 実際の bag で `make dagger-mirror right` を最後まで通す。
+
+---
+
 ## 2026-11-01 — コースの名前を c / cc から left / right に変える（branch: `model-slots`）
 
 ### 目的
