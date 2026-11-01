@@ -14,6 +14,7 @@ R1 で枠を切り替えたとき、今のモデルが反転（`mirror_*`）か�
 |---|---|
 | `platformio/core2/src/main.cpp`・`platformio/src/main.cpp`（両方同じ変更） | `isMirrorModel()`（`model_name` に `mirror` が入っているか）と `drawMirrorBadge(x, y)` を追加。反転モデルのときだけ、黄色の札（100×24、黒の縁取り）に黒の大きさ 2 で `MIRROR` と出す。`drawModelName()` の最後に (210, y+28) で描くので、画面 0 は y=186〜210、画面 1 の DRIVE の帯は y=184〜208 になる（日時の右）。DRIVE の待機表示では右下 (x+w-106, y+h-50) に描く（画面 0・画面 1 とも 204,155）。`make mirror` の `mirror_<向き>_<日時>` も、`--session` なしの `my_model_mirror_<日時>` も対象。ブリッジ・推論ノードは変えていない。 |
 | `src/tools/m5stack_visualizer/README.md` | `MIRROR` の札を追記。 |
+| `platformio/core2/platformio.ini`・`platformio/platformio.ini` | `platform = espressif32` → `espressif32@6.13.0` に固定。指定なしだと最新の 8.0.0（Arduino コア 3.x）が入り、M5Core2 0.1.9 が `std::uint8_t`・`GPIO` が無いというエラーでビルドできない。6.13.0 は Arduino コア 2.0.17。 |
 
 縁取りを黒にしたのは、Mux が Error のときの背景（黄色）でも札が見えるようにするため。
 
@@ -21,10 +22,12 @@ R1 で枠を切り替えたとき、今のモデルが反転（`mirror_*`）か�
 - [x] 段階 3 と同じく、まねたヘッダーで両方の `main.cpp` を g++ でコンパイルし、描画の座標を書き出した。
   - `mirror_counter_clockwise_*` では札が出て、`origin_clockwise_*` では出ない。
   - 札は、名前の行（画面 0 で y=169〜185）・日時（x=10〜142）・待機表示の `model :` の行（y=185）・`---`（x=150〜168）と重ならず、帯（y<215）の中に収まる。
-- [ ] PlatformIO でのビルドと書き込み（この PC に PlatformIO が無い）。
+- [x] PC に PlatformIO を入れ（`pip install --user platformio`、ユーザーを `dialout` に追加）、6.13.0 で Core2 版・Basic 版ともビルドが通った（2026-11-01）。
+- [x] 車の M5Stack は Core2 ではなく **Basic（か Gray）** だった。最初に Core2 版を書き込んだら画面がつかず、起動ログに `psram: PSRAM ID read error`・`i2cRead returned Error 263`（AXP192 が無い）・`FT6336 not responding`（タッチが無い）が出た。USB 変換は CP2104、チップは ESP32-D0WDQ6-V3・16MB。
+- [x] Basic 版（`platformio/`）を PC から書き込み（`pio run -t upload`、SUCCESS）、起動ログが `M5Stack initializing... OK` まで進むことを確かめた（SD カードのエラーはカードが無いだけ）。段階 3 のモデル名の表示も、このファームに入っている。
 
 ### TODO（実機）
-1. `cd src/tools/m5stack_visualizer/platformio/core2 && pio run -t upload`（Basic は `platformio/` で）。
+1. M5Stack を Jetson につなぎ直し、Jetson で `git pull` → `make build` → `make run`。
 2. R1 で `origin_*` と `mirror_*` を切り替え、`mirror_*` のときだけ札が出て、`origin_*` に戻すと消えることを、画面 0・画面 1・待機表示で確かめる。
 3. 札の色が、Auto（赤）・Manual（青）の背景で見やすいかを目で確かめる。
 
@@ -125,7 +128,7 @@ R1 で枠を切り替えたとき、今のモデルが反転（`mirror_*`）か�
   - 日時は `10/31 14:30` の形になる。
   - 同じ名前が続いても描き直さない。
   - 待機表示の 1 行（最長 48 文字）は x=16〜304 で、枠（x=10〜310）の中に収まる。
-- [ ] PlatformIO でのビルドと書き込み（この PC に PlatformIO が無い）。
+- [x] PlatformIO でのビルドと書き込み（2026-11-01、車の M5Stack は Basic なので Basic 版。`espressif32@6.13.0` に固定してから。2026-11-01 の節を参照）。
 - 既知（前から）: Core2 版は、Mux の状態を受けてから 3 秒で DRIVE を待機表示に戻す（`isMuxTimeout`）。`pwm_mux_node` は状態を切り替えたときにしか出さないので、Manual/Auto の表示は 3 秒で消える。モデル名は待機表示にも出るので消えない。今回は変えない（ユーザー判断）。
 
 ### TODO（実機、段階 3）
