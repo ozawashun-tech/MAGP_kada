@@ -47,6 +47,8 @@ M5Stack Core2 button controls: **BtnA** = previous mode, **BtnB** = refresh, **B
 
 The model name is split into the name and its timestamp (`_YYYYMMDD_HHMMSS`) on two lines. It is also shown in one small line on the DRIVE standby screen.
 
+When the model name contains `mirror` (a model trained on left-right mirrored data), a yellow `MIRROR` badge is shown at the bottom right of the DRIVE area (also on the standby screen).
+
 ### Setup
 
 ```bash
@@ -103,6 +105,8 @@ pio run -t upload
 M5Stack Core2ボタン: **BtnA**=前のモード、**BtnB**=画面リフレッシュ、**BtnC**=次のモード
 
 モデル名は、末尾の日時（`_YYYYMMDD_HHMMSS`）を分けて 2 行で出す（例: `origin_counter_clockwise` と `10/31 14:30`）。DRIVE の待機表示にも小さく 1 行で出す。
+
+モデル名に `mirror` が入っている（左右反転したデータで学習した）ときは、DRIVE の右下に黄色の札で `MIRROR` と出す（待機表示でも出す）。
 
 ### セットアップ
 

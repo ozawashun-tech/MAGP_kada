@@ -73,8 +73,10 @@ void drawMuxOnlyLarge();
 void drawInitialScreen();
 void drawStandbyArea(int x, int y, int w, int h, String title);
 void drawModelName(int y);
+void drawMirrorBadge(int x, int y);
 void drawDriveBand();
 bool isDigits(String s);
+bool isMirrorModel();
 uint16_t getStateColor(String state);
 uint16_t getMuxColor(String mode);
 void handleButtonPress();
@@ -205,6 +207,7 @@ void drawStandbyArea(int x, int y, int w, int h, String title) {
     if (title == "DRIVE" && model_name.length() > 0) {
         M5.Lcd.setCursor(x + 6, y + h - 20);
         M5.Lcd.print("model : " + model_name);
+        drawMirrorBadge(x + w - 106, y + h - 50);
     }
 }
 
@@ -577,6 +580,25 @@ void drawModelName(int y) {
         M5.Lcd.setCursor(10, y + 30);
         M5.Lcd.print(stamp);
     }
+    drawMirrorBadge(210, y + 28);
+}
+
+// 左右反転したモデルか（make mirror の mirror_<向き>_<日時>、--session なしの my_model_mirror_<日時>）
+bool isMirrorModel() {
+    return model_name.indexOf("mirror") != -1;
+}
+
+// 反転したモデルのとき、黄色の札に MIRROR と出す（Error の黄色の背景でも見えるよう黒で縁取る）
+void drawMirrorBadge(int x, int y) {
+    if (!isMirrorModel()) {
+        return;
+    }
+    M5.Lcd.fillRect(x, y, 100, 24, TFT_YELLOW);
+    M5.Lcd.drawRect(x, y, 100, 24, TFT_BLACK);
+    M5.Lcd.setTextSize(2);
+    M5.Lcd.setTextColor(TFT_BLACK);
+    M5.Lcd.setCursor(x + 14, y + 4);
+    M5.Lcd.print("MIRROR");
 }
 
 // DRIVE の帯（RECORDER と並べる画面の下半分）。モードを DRIVE の右に置き、下にモデル名を出す
