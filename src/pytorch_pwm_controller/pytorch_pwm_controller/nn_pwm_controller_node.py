@@ -40,9 +40,10 @@ class NNControllerNode(Node):
         self.declare_parameter('reload_model', True)
         self.declare_parameter('model_check_period', 1.0)
         # モデルの枠（model_path と同じディレクトリの <枠>.pth）。Manual 中に R1 でこの順に切り替える
+        # left / right は待機場所から見た本番のコース。training_src/jetson_sync.py の SLOTS と合わせる
         # PC の make dagger / mirror が枠を付け替え、current.pth（model_path）をその枠に向ける
         self.declare_parameter('slot_names', [
-            'origin_clockwise', 'origin_counter_clockwise', 'mirror_clockwise', 'mirror_counter_clockwise',
+            'origin_left', 'origin_right', 'mirror_left', 'mirror_right',
         ])
         self.declare_parameter('joy_topic', '/joy')
         self.declare_parameter('l1_button_index', 4)

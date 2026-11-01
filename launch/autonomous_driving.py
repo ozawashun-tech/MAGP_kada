@@ -53,7 +53,7 @@ def generate_launch_description():
             name='nn_pwm_controller_node',
             output='screen',
             parameters=[{
-                # PC の make dagger / mirror が枠（origin_clockwise.pth など）と current.pth を付け替える
+                # PC の make dagger / mirror が枠（origin_left.pth など）と current.pth を付け替える
                 # （Manual 中に、current.pth が指す枠を読み込み直す）。Manual 中に R1 で枠を切り替えられる
                 # 一度も付け替えていなければ my_model.pth を使う。使っているモデル名は /nn_pwm_controller/model に出す
                 'model_path': '/home/jetson/models/current.pth',

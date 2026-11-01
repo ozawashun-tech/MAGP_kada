@@ -14,29 +14,35 @@ LOCAL_BAG_DIR = (Path(__file__).resolve().parent / "../dataset/train").resolve()
 JETSON_MODEL_DIR = os.environ.get("MAGP_JETSON_MODEL_DIR", "/home/jetson/models").rstrip("/")
 CURRENT_LINK = "current.pth"
 
-# コースを走る向き（make dagger c / cc）。session.txt の bag の行にも書く
-DIRECTIONS = {"c": "clockwise", "cc": "counter_clockwise"}
+# 本番のコース（待機場所から見て左 / 右。左右対称で、走る向きも鏡写し）。make dagger left / right で指定し、
+# session.txt の bag の行にも書く。片方のコースの走りを左右反転すると、もう片方のコースの走りになる
+COURSES = ("left", "right")
 # Jetson のモデルの枠。JETSON_MODEL_DIR/<枠>.pth が実体へのリンクで、current.pth は最後に
 # deploy・rollback した枠のリンクを指す。推論ノードは Manual 中に R1 でこの順に切り替える
-SLOTS = ["origin_clockwise", "origin_counter_clockwise", "mirror_clockwise", "mirror_counter_clockwise"]
-# origin の枠の 1 つ前のモデル（make rollback c / cc で戻す）
+SLOTS = ["origin_left", "origin_right", "mirror_left", "mirror_right"]
+# origin の枠の 1 つ前のモデル（make rollback left / right で戻す）
 PREV_SUFFIX = ".prev"
 
-# 学習に使う bag と向きの一覧。行頭が # の bag は使わない
+# 学習に使う bag とコースの一覧。行頭が # の bag は使わない
 SESSION_FILE = LOCAL_BAG_DIR / "session.txt"
 
 SSH_OPTIONS = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=5"]
 
 
-def slot_name(direction, mirror=False):
-    """
-    学習に使う bag の向きから、モデルの枠の名前を返す
+def opposite(course):
+    """反対のコース（left ↔ right）"""
+    return "right" if course == "left" else "left"
 
-    反転したモデルは反対の向きのコースを走るので、c の bag から作ると mirror_counter_clockwise になる
+
+def slot_name(course, mirror=False):
+    """
+    学習に使う bag のコースから、モデルの枠の名前を返す
+
+    反転したモデルは反対のコースを走るので、left の bag から作ると mirror_right になる
     """
     if mirror:
-        return f"mirror_{DIRECTIONS['cc' if direction == 'c' else 'c']}"
-    return f"origin_{DIRECTIONS[direction]}"
+        return f"mirror_{opposite(course)}"
+    return f"origin_{course}"
 
 
 def _list_remote_bags():
@@ -135,7 +141,11 @@ def fetch_latest_bags(count=1):
 
 
 def _read_session():
-    """session.txt から (使う bag と向きの組, 書かれている全 bag) を返す"""
+    """
+    session.txt から (使う bag の (名前, コース, mirror で走ったか) の組, 書かれている全 bag) を返す
+
+    3 つ目に mirror と書いた bag は、そのコースで mirror の枠を走らせて録った bag
+    """
     used, known = [], set()
     for line in SESSION_FILE.read_text().splitlines():
         line = line.strip()
@@ -147,11 +157,11 @@ def _read_session():
         known.add(name)
         if excluded:
             continue
-        direction = words[1] if len(words) > 1 else None
-        if direction not in DIRECTIONS:
-            print(f"Warning: {name} の向き（c / cc）が書かれていないので使いません。{SESSION_FILE} に書き足してください")
+        course = words[1] if len(words) > 1 else None
+        if course not in COURSES:
+            print(f"Warning: {name} のコース（left / right）が書かれていないので使いません。{SESSION_FILE} に書き足してください")
             continue
-        used.append((name, direction))
+        used.append((name, course, words[2:3] == ["mirror"]))
     return used, known
 
 
@@ -189,7 +199,7 @@ def new_session():
     session.txt を作り直し、Jetson のモデルの枠を空にする（コースが変わったときに使う）
 
     今 Jetson にある bag は # 付き（使わない）で書いておき、これ以降に記録した bag だけが
-    sync_session() で自動的に足される。前の bag を使うときは、行頭の # を消して向きを書く
+    sync_session() で自動的に足される。前の bag を使うときは、行頭の # を消してコースを書く
     """
     remote_bags = _list_remote_bags()
     if remote_bags is None:
@@ -205,8 +215,10 @@ def new_session():
     lines = [
         f"# {datetime.now():%Y-%m-%d %H:%M} に作成",
         "# 学習に使う bag の一覧。行頭に # を付けた bag は使わない",
-        "# bag 名のあとに走った向き（c: 時計回り / cc: 反時計回り）を書く。make dagger c / cc が書き足す",
-        "# 以下はセッション開始前の bag（使うときは # を消し、向きを書く）",
+        "# bag 名のあとに走ったコース（待機場所から見て left: 左 / right: 右）を書く。make dagger left / right が書き足す",
+        "# 3 つ目の mirror は、そのコースで mirror の枠を走らせて録った bag（make dagger-mirror left / right が書き足す）。",
+        "# 反対のコースの bag と一緒に、反対のコースの origin と、そのコースの mirror の学習に使う",
+        "# 以下はセッション開始前の bag（使うときは # を消し、コースを書く）",
     ]
     lines += [f"# {name}" for name in remote_bags]
     SESSION_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -214,17 +226,23 @@ def new_session():
     print(f"New session: {SESSION_FILE}（既存の bag {len(remote_bags)} 本は使わない）")
 
 
-def sync_session(direction, add_new=True):
+def sync_session(course, add_new=True, mirror_run=False):
     """
-    Jetson の新しい bag を session.txt に書き足し、向きが direction の bag を取ってきてパスを返す
+    Jetson の新しい bag を session.txt に書き足し、origin_<course> と対の mirror の学習に使う bag を
+    取ってきて返す
+
+    使うのは、コースが course の bag と、反対のコースで mirror の枠（mirror_<反対のコース>）を
+    走らせて録った bag（session.txt で「<反対のコース> mirror」）。後者は origin の学習では反転して使う
 
     Args:
-        direction: "c"（時計回り）か "cc"（反時計回り）。新しい bag はこの向きとして書き足す
+        course: "left"（左）か "right"（右）。origin の枠のコース
         add_new: False なら新しい bag を書き足さず、session.txt にある bag だけを使う
-            （反転モデルを作るとき。反転したコースで録った bag を混ぜないため）
+            （反転モデルだけを作るとき。どのコースで録ったかわからない bag を混ぜないため）
+        mirror_run: True なら新しい bag を「<反対のコース> mirror」として書き足す。False なら「<course>」
 
     Returns:
-        list of Path: ローカルの bag ディレクトリのパス（session.txt の順）
+        list of (Path, bool): ローカルの bag ディレクトリのパスと、mirror で走って録った bag か
+        （session.txt の順）
     """
     if not SESSION_FILE.exists():
         raise FileNotFoundError(f"{SESSION_FILE} がありません。先に make new-session を実行してください")
@@ -238,40 +256,49 @@ def sync_session(direction, add_new=True):
     if new_bags and not add_new:
         print(f"Not added to session (add_new=False): {', '.join(new_bags)}")
     elif new_bags:
+        # mirror で走ったコースは、origin の枠の反対
+        driven = opposite(course) if mirror_run else course
+        tag = f"{driven} mirror" if mirror_run else driven
         with SESSION_FILE.open("a") as f:
             f.write(f"# {datetime.now():%Y-%m-%d %H:%M} に追加\n")
-            f.writelines(f"{name} {direction}\n" for name in new_bags)
-        print(f"Added to session as {direction} ({DIRECTIONS[direction]}): {', '.join(new_bags)}")
-        print(f"  前回のあとに録った bag をすべて {direction} として足しました。違う向きの bag があれば {SESSION_FILE} を直してください")
-        used += [(name, direction) for name in new_bags]
+            f.writelines(f"{name} {tag}\n" for name in new_bags)
+        print(f"Added to session as '{tag}': {', '.join(new_bags)}")
+        print(f"  前回のあとに録った bag をすべて '{tag}' として足しました。違う bag があれば {SESSION_FILE} を直してください")
+        used += [(name, driven, mirror_run) for name in new_bags]
 
-    used = [name for name, d in used if d == direction]
+    used = [(name, m) for name, c, m in used if c == (opposite(course) if m else course)]
     if not used:
-        raise FileNotFoundError(f"{SESSION_FILE} に {direction}（{DIRECTIONS[direction]}）の bag がありません")
+        raise FileNotFoundError(f"{SESSION_FILE} に {slot_name(course)} の学習に使う bag がありません")
 
-    paths = []
-    for name in used:
+    bags = []
+    for name, m in used:
         if name in remote_bags:
-            paths.append(_rsync_bag(name))
+            bags.append((_rsync_bag(name), m))
         elif (LOCAL_BAG_DIR / name / "metadata.yaml").exists():
-            paths.append(LOCAL_BAG_DIR / name)
+            bags.append((LOCAL_BAG_DIR / name, m))
         else:
             raise FileNotFoundError(f"{name} が Jetson にもローカルにもありません")
-    return paths
+    return bags
 
 
-def _deploy_script(name, slot, model_dir=JETSON_MODEL_DIR):
-    """送った .{name}.part に名前を付け、枠 <slot>.pth と current.pth を付け替えるスクリプト"""
+def _deploy_script(name, slot, model_dir=JETSON_MODEL_DIR, switch_current=True):
+    """送った .{name}.part に名前を付け、枠 <slot>.pth と current.pth（switch_current のとき）を付け替えるスクリプト"""
     q = shlex.quote
     part = f".{name}.part"
     link = f"{slot}.pth"
     prev = f"{slot}{PREV_SUFFIX}.pth"
-    # origin の枠だけ、1 つ前のモデルを残す（make rollback c / cc で戻す）
+    # origin の枠だけ、1 つ前のモデルを残す（make rollback left / right で戻す）
     keep_prev = (
         f'if [ -L {link} ]; then ln -sfn -- "$(readlink {link})" .{prev}.tmp && mv -Tf .{prev}.tmp {prev}; fi'
         if slot.startswith("origin_")
         else ""
     )
+    if switch_current:
+        switch = f"ln -sfn -- {link} .{CURRENT_LINK}.tmp && mv -Tf .{CURRENT_LINK}.tmp {CURRENT_LINK}"
+        done = f'echo "{link} -> {name}（{CURRENT_LINK} -> {link}）"'
+    else:
+        switch = ""
+        done = f'echo "{link} -> {name}（{CURRENT_LINK} はそのまま）"'
     # 書き終わってから名前を付け、リンクも一時名で作ってから mv で置き換える
     # （推論ノードが書きかけのファイルを読まないように）
     return f"""
@@ -282,17 +309,19 @@ if [ -e {CURRENT_LINK} ] && [ ! -L {CURRENT_LINK} ]; then rm -f -- {q(part)}; ec
 mv -- {q(part)} {q(name)}
 {keep_prev}
 ln -sfn -- {q(name)} .{link}.tmp && mv -Tf .{link}.tmp {link}
-ln -sfn -- {link} .{CURRENT_LINK}.tmp && mv -Tf .{CURRENT_LINK}.tmp {CURRENT_LINK}
-echo "{link} -> {name}（{CURRENT_LINK} -> {link}）"
+{switch}
+{done}
 """
 
 
-def deploy_model(local_path, slot):
+def deploy_model(local_path, slot, switch_current=True):
     """
     学習したモデルを Jetson の JETSON_MODEL_DIR に送り、枠 <slot>.pth と current.pth を付け替える
 
     既存のファイルは上書きしない。origin の枠は、前の行き先を <slot>.prev.pth に残す。
-    推論ノードは Manual 中に、current.pth が指す枠（送ったモデル）に切り替える
+    推論ノードは Manual 中に、current.pth が指す枠（送ったモデル）に切り替える。
+    switch_current=False なら current.pth は付け替えず、車は今の枠のまま
+    （R1 でこの枠を選んでいれば、Manual 中に新しいモデルを読み込む）
     """
     if slot not in SLOTS:
         raise ValueError(f"unknown slot: {slot}")
@@ -311,8 +340,11 @@ def deploy_model(local_path, slot):
         ],
         check=True,
     )
-    _run_remote(_deploy_script(name, slot))
-    print("Manual のまま 1 秒ほど待つと、推論ノードが新しいモデルを読み込みます")
+    _run_remote(_deploy_script(name, slot, switch_current=switch_current))
+    if switch_current:
+        print("Manual のまま 1 秒ほど待つと、推論ノードが新しいモデルを読み込みます")
+    else:
+        print(f"車は今の枠のまま。Manual 中に R1 で {slot} を選ぶと、このモデルで走ります")
 
 
 def _rollback_script(slot, model_dir=JETSON_MODEL_DIR):
@@ -333,9 +365,9 @@ echo "{link} -> $old（{prev} -> $cur、{CURRENT_LINK} -> {link}）"
 """
 
 
-def rollback_model(direction):
+def rollback_model(course):
     """origin の枠を 1 つ前のモデルに戻し、その枠に切り替える（もう一度実行すると元に戻る）"""
-    _run_remote(_rollback_script(slot_name(direction)))
+    _run_remote(_rollback_script(slot_name(course)))
 
 
 if __name__ == "__main__":
@@ -344,10 +376,10 @@ if __name__ == "__main__":
     command = sys.argv[1] if len(sys.argv) > 1 else "fetch"
     if command == "new-session":
         new_session()
-    elif command == "rollback" and len(sys.argv) == 3 and sys.argv[2] in DIRECTIONS:
+    elif command == "rollback" and len(sys.argv) == 3 and sys.argv[2] in COURSES:
         rollback_model(sys.argv[2])
     elif command == "fetch":
         for bag_path in fetch_latest_bags():
             print(bag_path)
     else:
-        sys.exit(f"usage: {sys.argv[0]} [fetch | new-session | rollback c|cc]")
+        sys.exit(f"usage: {sys.argv[0]} [fetch | new-session | rollback left|right]")

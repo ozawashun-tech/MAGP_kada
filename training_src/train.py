@@ -7,11 +7,12 @@ from dataset import (
     RosbagDataset,
     load_rosbags,
 )
-from jetson_sync import DIRECTIONS, deploy_model, fetch_latest_bags, slot_name, sync_session
+from jetson_sync import COURSES, deploy_model, fetch_latest_bags, opposite, slot_name, sync_session
 from model import DNN
 from torch.utils.data import random_split
 from datetime import datetime
 from pathlib import Path
+import copy
 import os
 
 
@@ -127,7 +128,8 @@ def train_model(
         use_normalization: データ正規化を使用するかどうか
         checkpoint_interval: チェックポイント保存間隔（エポック数）
         source_weights: /mux_pwm/source のラベルごとのサンプルの重み（DataPreprocessConfig を参照）
-        mirror: True ならスキャンとステアリングを左右反転して学習する（左右対称なもう一方のコース用）
+        mirror: True ならスキャンとステアリングを左右反転して学習する（左右対称なもう一方のコース用）。
+            bag_paths と同じ長さの bool のリストなら、bag ごとに反転するかを決める
     """
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
@@ -152,12 +154,21 @@ def train_model(
         blocked_front_distance=0.1,
         stuck_scan_change=0.008,
         collision_margin_after=40,
-        mirror=mirror,
+        mirror=mirror if isinstance(mirror, bool) else False,
         # 反転の軸は、車がまっすぐ進むステアリングの PWM。10/29・10/30 の bag で、ジャイロの
         # ヨーレートが 0 になる PWM を当てはめると 1272〜1274 だった（設定の中央は 1265）。
         # ヨーレートの PWM に対する傾きは、中央の左右でほぼ同じ（比 0.8〜1.1）なので、線形に折り返す
         mirror_steering_center=1273,
     )
+    if not isinstance(mirror, bool):
+        # load_rosbags の設定は .db3 ファイルごとなので、bag の .db3 の数だけ並べる
+        bag_configs = []
+        for path, bag_mirror in zip(bag_paths, mirror, strict=True):
+            bag_config = copy.copy(config)
+            bag_config.mirror = bag_mirror
+            path = Path(path)
+            bag_configs += [bag_config] * (1 if path.is_file() else len(list(path.rglob("*.db3"))))
+        config = bag_configs
     scan_df, joy_df, file_boundaries = load_rosbags(bag_paths, preprocess_configs=config)
 
     # データセットの作成
@@ -449,23 +460,36 @@ if __name__ == "__main__":
     parser.add_argument(
         "--session",
         action="store_true",
-        help="dataset/train/session.txt の、向きが --direction の bag で学習する"
-        "（Jetson の新しい bag をその向きとして自動で書き足す）。指定しなければ Jetson の最新の bag 1 本で学習する",
+        help="dataset/train/session.txt の、コースが --course の bag で学習する"
+        "（Jetson の新しい bag をそのコースとして自動で書き足す）。指定しなければ Jetson の最新の bag 1 本で学習する",
     )
     parser.add_argument(
-        "--direction",
-        choices=list(DIRECTIONS),
-        help="--session で使う bag の向き（c: 時計回り / cc: 反時計回り）。モデルの枠の名前もこれで決まる",
+        "--course",
+        choices=COURSES,
+        help="--session で使う bag のコース（待機場所から見て left: 左 / right: 右）。モデルの枠の名前もこれで決まる",
     )
     parser.add_argument(
         "--deploy",
         action="store_true",
-        help="学習したモデルを Jetson に送り、枠（origin_clockwise.pth など）と current.pth を付け替える（--session が必要）",
+        help="学習したモデルを Jetson に送り、枠（origin_left.pth など）と current.pth を付け替える（--session が必要）",
     )
     parser.add_argument(
         "--mirror",
         action="store_true",
         help="スキャンとステアリングを左右反転して学習する（左右対称なもう一方のコースを走るモデル）",
+    )
+    parser.add_argument(
+        "--with-mirror",
+        action="store_true",
+        help="学習（と --deploy）のあと、同じ bag を左右反転したモデルも学習して、反対のコースの mirror の枠に送る"
+        "（current.pth は付け替えないので、車は先に送った枠のまま。--session が必要）",
+    )
+    parser.add_argument(
+        "--mirror-run",
+        action="store_true",
+        help="Jetson の新しい bag は、--course のコースで mirror_<コース> の枠を走らせて録ったもの"
+        "（session.txt に「<コース> mirror」と書き足す）。その mirror の枠と、対の origin_<反対のコース> を学習し、"
+        "mirror の枠を先に送って車もそちらにする（--session が必要）",
     )
     parser.add_argument(
         "--bags",
@@ -474,53 +498,74 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
     use_session = args.session and not args.bags
-    if use_session and args.direction is None:
-        parser.error("--session には --direction c か --direction cc が必要です")
+    if use_session and args.course is None:
+        parser.error("--session には --course left か --course right が必要です")
     if args.deploy and not use_session:
         parser.error("--deploy は --session と一緒に使います（送り先の枠が決まらないため）")
+    if (args.with_mirror or args.mirror_run) and (not use_session or args.mirror):
+        parser.error("--with-mirror / --mirror-run は --session と一緒に、--mirror なしで使います")
 
+    # 学習する origin の枠のコース。mirror_<コース> で走ったなら、対の origin は反対のコース
+    origin_course = opposite(args.course) if args.mirror_run else args.course
+
+    # (bag のパス, mirror で走って録った bag か)。mirror で走った bag は反対のコースのものなので、
+    # origin の学習では反転し、mirror の学習ではそのまま使う
     if args.bags:
         train_dir = Path(__file__).resolve().parent.parent / "dataset" / "train"
-        bag_paths = [Path(b) if Path(b).exists() else train_dir / b for b in args.bags]
+        bags = [(Path(b) if Path(b).exists() else train_dir / b, False) for b in args.bags]
     elif args.session:
-        # 反転モデルは、その向きで録った bag だけで作る。新しい bag は
-        # 反転したコースで録ったものかもしれないので、書き足さない
-        bag_paths = sync_session(args.direction, add_new=not args.mirror)
+        # 反転モデルだけを作るときは、新しい bag はどのコースで録ったかわからないので、書き足さない
+        bags = sync_session(origin_course, add_new=not args.mirror, mirror_run=args.mirror_run)
     else:
-        bag_paths = fetch_latest_bags()
+        bags = [(path, False) for path in fetch_latest_bags()]
     print("\nBags used for training:")
-    for path in bag_paths:
-        print(f"  {path.name}")
+    for path, mirror_run in bags:
+        print(f"  {path.name}{'（mirror で走った bag。origin では反転する）' if mirror_run else ''}")
 
-    # 既存のモデルを上書きしないよう、学習した日時をファイル名に入れる
-    model_dir = Path(__file__).resolve().parent.parent / "model" / "transformer"
-    if use_session:
-        slot = slot_name(args.direction, args.mirror)
-        prefix = slot
-        print(f"Model slot: {slot}")
+    def train_and_save(mirror):
+        """bags で学習して保存し、(保存先, 枠) を返す（--session でなければ枠は None）"""
+        # 既存のモデルを上書きしないよう、学習した日時をファイル名に入れる
+        model_dir = Path(__file__).resolve().parent.parent / "model" / "transformer"
+        if use_session:
+            slot = slot_name(origin_course, mirror)
+            prefix = slot
+            print(f"Model slot: {slot}")
+        else:
+            slot = None
+            prefix = "my_model_mirror" if mirror else "my_model"
+        model_save_path = model_dir / f"{prefix}_{datetime.now():%Y%m%d_%H%M%S}.pth"
+
+        bag_mirrors = [mirror != mirror_run for _, mirror_run in bags]
+        train_model(
+            bag_paths=[path for path, _ in bags],
+            model_save_path=str(model_save_path),
+            # launch/autonomous_driving.py の推論ノードと合わせる
+            scan_history_length=20,
+            scan_history_stride=10,
+            prediction_steps=1,
+            batch_size=32,
+            epochs=128,
+            learning_rate=0.0001,
+            validation_split=0.2,
+            early_stopping_patience=10,
+            use_normalization=True,
+            checkpoint_interval=10,
+            # 自動で L2 を押していない区間（教師がモデル自身の出力）は除外し、L2 で補正した区間を重くする
+            # ラベル（/mux_pwm/source）の無い bag は全区間 1.0
+            source_weights={"manual": 1.0, "auto": 0.0, "auto_l2": 3.0},
+            mirror=bag_mirrors[0] if len(set(bag_mirrors)) == 1 else bag_mirrors,
+        )
+        return model_save_path, slot
+
+    # 今走っているコースの枠（mirror で走ったなら mirror）を先に学習して送り、車もそちらにする。
+    # 対の枠はそのあとに作り直し、current.pth は付け替えない（途中で Ctrl+C で止めても、先に送ったモデルは使える）
+    if args.mirror_run:
+        mirrors = [True, False]
     else:
-        prefix = "my_model_mirror" if args.mirror else "my_model"
-    model_save_path = model_dir / f"{prefix}_{datetime.now():%Y%m%d_%H%M%S}.pth"
-
-    train_model(
-        bag_paths=bag_paths,
-        model_save_path=str(model_save_path),
-        # launch/autonomous_driving.py の推論ノードと合わせる
-        scan_history_length=20,
-        scan_history_stride=10,
-        prediction_steps=1,
-        batch_size=32,
-        epochs=128,
-        learning_rate=0.0001,
-        validation_split=0.2,
-        early_stopping_patience=10,
-        use_normalization=True,
-        checkpoint_interval=10,
-        # 自動で L2 を押していない区間（教師がモデル自身の出力）は除外し、L2 で補正した区間を重くする
-        # ラベル（/mux_pwm/source）の無い bag は全区間 1.0
-        source_weights={"manual": 1.0, "auto": 0.0, "auto_l2": 3.0},
-        mirror=args.mirror,
-    )
-
-    if args.deploy:
-        deploy_model(model_save_path, slot)
+        mirrors = [args.mirror] + ([True] if args.with_mirror else [])
+    for i, mirror in enumerate(mirrors):
+        if i > 0:
+            print(f"\nTraining the {'mirrored' if mirror else 'origin'} model from the same bags...")
+        model_save_path, slot = train_and_save(mirror)
+        if args.deploy:
+            deploy_model(model_save_path, slot, switch_current=i == 0)

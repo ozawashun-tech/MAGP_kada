@@ -4,6 +4,114 @@
 
 ---
 
+## 2026-11-01 — コースの名前を c / cc から left / right に変える（branch: `model-slots`）
+
+### 目的
+本番は、待機場所から見て左右に左右対称のコースが 1 つずつあり、走る向きも鏡写しで決まっている（ユーザーに確認）。時計回り / 反時計回りではなく、左 / 右で呼べるようにする。仕組み（対の 2 つの枠、反転、`dagger-mirror`）は変えず、名前だけを置き換えた。
+
+| 前 | 後 |
+|---|---|
+| `make dagger c` / `cc` | `make dagger left` / `right`（`dagger-mirror`・`mirror`・`rollback` も同じ） |
+| `origin_clockwise` / `origin_counter_clockwise` | `origin_left` / `origin_right` |
+| `mirror_counter_clockwise`（c の bag を反転） / `mirror_clockwise`（cc の bag を反転） | `mirror_right`（left の bag を反転） / `mirror_left`（right の bag を反転） |
+| session.txt `rosbag2_... c` / `rosbag2_... cc mirror` | `rosbag2_... left` / `rosbag2_... right mirror` |
+| `train.py --direction c|cc` | `train.py --course left|right` |
+
+### 変更内容
+| ファイル | 内容 |
+|---|---|
+| `training_src/jetson_sync.py` | `DIRECTIONS` → `COURSES = ("left", "right")`、`SLOTS` を新しい名前に。`opposite()`・`slot_name()`・`sync_session()`・`rollback_model()` の引数を `course` に。session.txt の見出しの説明も直した。 |
+| `training_src/train.py` | `--direction` → `--course`。 |
+| `Makefile` | `DIRECTION` → `COURSE`、何もしないターゲットを `left right` に。ヘルプも直した。 |
+| `src/pytorch_pwm_controller/.../nn_pwm_controller_node.py` | `slot_names` の初期値を `origin_left, origin_right, mirror_left, mirror_right` に（**Jetson のコードの変更**）。R1 はこの順に回る。 |
+| `launch/autonomous_driving.py`・両方の `main.cpp` | コメントの例だけ直した（ファームは書き込み直さなくてよい）。 |
+| `操作説明.md`・`CLAUDE.md` | 全体を left / right で書き直した。今の車の M5Stack は Basic なので、1-3 の書き込みも Basic を先に書いた。 |
+
+この節より前の 11/01・10/31 の節は、当時の名前（c / cc、`origin_clockwise` など）のまま残している。
+
+### データの移し替え（2026-11-01 に実施）
+- PC の `dataset/train/session.txt`: 今日の bag `rosbag2_2026_11_01-13_03_31_1 c` を `left` に（ユーザーに確認: 左のコース）。見出しの説明も新しくした。
+- Jetson `/home/jetson/models/`: `origin_clockwise.pth` → `origin_left.pth`、`mirror_counter_clockwise.pth` → `mirror_right.pth`、`current.pth` → `mirror_right.pth`（移す前と同じモデル）。M5Stack には実体のファイル名が出るので、実体を `origin_left_20261101_140712.pth`・`mirror_right_20261101_141005.pth` として **コピー** し、新しい枠はコピーを指す。元の `.pth` はそのまま残し、古い枠のリンク 2 つだけを消した。
+
+### 確認状況（PC）
+- [x] `py_compile`（`train.py`・`jetson_sync.py`・推論ノード）が通る。
+- [x] `make -n` で `dagger left`・`dagger-mirror right`・`mirror left`・`rollback right` のコマンドが新しい形になる。`make dagger c` はコースの指定が無いというエラーで止まる。`train.py --course c` も止まる。
+- [x] 前の節と同じ、学習・送信を差し替えたテストを新しい名前で流し、同じ結果（`dagger-mirror right` → `mirror_right` を送って車も切り替え → `origin_left` を送る、`dagger right` に `right mirror` の bag が入らない など）になった。
+- [x] 移し替えた session.txt を `_read_session()` で読むと `('rosbag2_2026_11_01-13_03_31_1', 'left', False)` になる。
+
+### TODO（実機）
+1. Jetson で `git pull` → `make build` → `make run` をやり直す（推論ノードの枠の名前が変わるため。やり直すまで R1 は「No model slots」になる）。
+2. R1 で `origin_left` と `mirror_right` を行き来でき、`mirror_right` のときだけ `MIRROR` の札が出ることを確かめる。
+3. `make dagger left` を実行し、`origin_left_<日時>` と `mirror_right_<日時>` が送られることを確かめる。
+
+---
+
+## 2026-11-01 — mirror で走って L2 で直した bag を、対の origin と mirror の両方に入れる（branch: `model-slots`）
+
+### 目的
+反時計回りのコースで `mirror_counter_clockwise`（時計回りの bag を反転したモデル）を走らせ、L2 で直した bag を、`mirror_counter_clockwise` と、元になった `origin_clockwise` の **両方** に反映する。10/31 の「L2 補正を mirror のモデルには掛けない方針」を、ユーザーの判断で変えた。
+
+ユーザーと決めたこと:
+- 反映先は対の 2 つだけ（`origin_counter_clockwise` と `mirror_clockwise` には入れない）。入れると時計回りと反時計回りの学習データがほぼ同じになり、origin と mirror の違いが無くなるため。
+- mirror で走った bag は、コマンドで指定する（bag のモデル名から自動で判定はしない）。
+- 学習し直したら、車は mirror の枠にする（そのコースで練習を続けるため）。
+
+### 変更内容
+| ファイル | 内容 |
+|---|---|
+| `training_src/jetson_sync.py` | session.txt の行に 3 つ目の `mirror` を足せるようにした（`rosbag2_<日時> cc mirror` = cc のコースで `mirror_counter_clockwise` を走らせて録った bag）。`sync_session(direction, add_new, mirror_run)` の `direction` は origin の枠の向きで、向きが `direction` の bag と「反対の向き mirror」の bag を `(パス, mirror で走ったか)` で返す。`mirror_run=True` なら新しい bag を「反対の向き mirror」として書き足す。`opposite()` を追加。`new_session()` の見出しに `mirror` の説明を足した。 |
+| `training_src/train.py` | `--mirror-run` を追加（`--direction` は走ったコースの向き。対の origin は反対の向き）。mirror の枠を先に学習して送り（`current.pth` もそちら）、続けて origin を学習して送る（`current.pth` はそのまま）。各学習では、bag ごとに「学習するのが mirror か」と「mirror で走った bag か」が違うときだけ反転する。`train_model(mirror=...)` は bool に加えて bag ごとの bool のリストを受け取り、`.db3` の数だけ設定を並べて `load_rosbags` に渡す。 |
+| `Makefile` | `make dagger-mirror c|cc` を追加（`train.py --session --direction <向き> --deploy --mirror-run`）。 |
+| `操作説明.md`・`CLAUDE.md` | 手順 8-2 と全体の流れ、session.txt の書き方を足した。手順 8 の「mirror に L2 補正はしない方針」を消した。 |
+
+- `make dagger c` と `make mirror c` も、session.txt に「cc mirror」の bag があれば使う（origin では反転、mirror ではそのまま）。
+- mirror で走った bag を `make dagger` で足すと、その向きの origin の bag として混ざる。逆も同じ。切り替える前に、それまでの bag を足しておく必要がある（`操作説明.md` に書いた）。
+
+### 確認状況（PC）
+- [x] `py_compile` が通る。
+- [x] 一時フォルダーの session.txt と、学習・送信を差し替えた `train.py` の main で確かめた。
+  - `make dagger-mirror cc` 相当: 新しい bag が `cc mirror` で書き足され、`mirror_counter_clockwise` を（時計回りの bag だけ反転して）学習 → 送信（`current.pth` を付け替え）→ `origin_clockwise` を（mirror の bag だけ反転して）学習 → 送信（付け替えない）の順になる。
+  - `make dagger c` 相当: 同じ bag で origin → mirror の順。`make mirror c` 相当: mirror だけ。
+  - `make dagger cc` 相当（`origin_counter_clockwise`）には、`cc mirror` の bag が入らない。
+  - `train_model(mirror=[False, True])` で、`.db3` が 2 つある bag にも設定が 2 つ並ぶ。
+- [ ] 実際の bag で `make dagger-mirror` を最後まで通す。
+
+### TODO（実機）
+1. 反時計回りのコースで `mirror_counter_clockwise` を選び、Auto + L2 で bag を録って `make dagger-mirror cc` を実行する。M5Stack が新しい日時の `mirror_counter_clockwise`（`MIRROR` の札つき）になり、origin が送られてもそのままなことを確かめる。
+2. 新しい `mirror_counter_clockwise` で、直したところが良くなっているか走らせて確かめる。
+3. 時計回りに戻して `origin_clockwise` を走らせ、悪くなっていないか確かめる（反転した bag が混ざるため）。
+
+---
+
+## 2026-11-01 — make dagger で反転モデルも一緒に作る（branch: `model-slots`）
+
+### 目的
+`make dagger c` を 1 回実行するだけで、時計回りのモデル（`origin_clockwise`）と、それを反転した反時計回り用のモデル（`mirror_counter_clockwise`）の両方が新しくなるようにする（`cc` も同じ）。L2 補正を繰り返すたびに `make mirror` を別に実行しなくて済む。
+
+### 変更内容
+| ファイル | 内容 |
+|---|---|
+| `training_src/train.py` | `--with-mirror` を追加（`--session` が必要、`--mirror` とは併用不可）。学習の部分を `train_and_save(mirror)` にまとめ、origin を学習して送ったあと、**同じ `bag_paths`** で反転モデルを学習し、`slot_name(direction, True)` の枠に送る。bag の取得・書き足しは 1 回だけ。 |
+| `training_src/jetson_sync.py` | `deploy_model()` / `_deploy_script()` に `switch_current`（既定 True）を追加。False なら `current.pth` を付け替えない。反転モデルはこれで送るので、車は先に送った origin の枠のまま。R1 で mirror の枠を選んでいれば、推論ノードは実体の変化を見て Manual 中に読み込み直す。 |
+| `Makefile` | `make dagger` に `--with-mirror` を付けた。`make mirror` は、反転モデルだけを作り直す用にそのまま残す（こちらは `current.pth` も付け替える）。 |
+| `操作説明.md`・`CLAUDE.md` | 手順 4・6・7・8 と全体の流れを直した。 |
+
+- origin を先に送るので、反転モデルの学習中（数分）も、車は新しい origin で Auto + L2 の練習を続けられる。ただし次の `make dagger` は、反転モデルが送られて終わってから実行する。
+- origin を送ったあとに Ctrl+C で止めても、origin はそのまま使える（反転モデルは前のまま）。
+- `make rollback c` で戻るのは origin だけ。mirror の枠は新しいまま。
+- 学習時間は 2 倍になる。
+
+### 確認状況（PC）
+- [x] `py_compile` が通る。`--with-mirror` を `--session` なし・`--mirror` と一緒に使うとエラーになる。
+- [x] `_deploy_script()` を一時フォルダーで実行し、origin では `current.pth` → `origin_clockwise.pth` に付け替わり（`origin_clockwise.prev.pth` も残る）、mirror では `mirror_counter_clockwise.pth` だけが付け替わって `current.pth` がそのままなことを確かめた。
+- [ ] 実際の bag で `make dagger c` を最後まで通す（学習 2 回と deploy 2 回）。
+
+### TODO（実機）
+1. `make dagger c` を実行し、origin が送られた時点で M5Stack が `origin_clockwise` になり、反転モデルが送られても `origin_clockwise` のまま変わらないことを確かめる。
+2. Manual で R1 を押し、`mirror_counter_clockwise` に切り替わって `MIRROR` の札が出ることを確かめる（11/01 の札の TODO もこれで確かめられる）。
+
+---
+
 ## 2026-11-01 — M5Stack に反転モデルかどうかを出す（branch: `model-slots`）
 
 ### 目的

@@ -36,7 +36,7 @@ BagRecorderStatus prev_bag_status;
 BagRecorderEvent last_event;
 MuxInputStatus mux_status;
 MuxInputStatus prev_mux_status;
-// 推論ノードが使っているモデル名（/nn_pwm_controller/model、例: origin_clockwise_20261031_143012）
+// 推論ノードが使っているモデル名（/nn_pwm_controller/model、例: origin_left_20261031_143012）
 String model_name = "";
 String prev_model_name = "";
 unsigned long last_receive_time = 0;
@@ -556,7 +556,7 @@ bool isDigits(String s) {
 }
 
 // モデル名を出す（Manual・Auto どちらでも）。末尾の _YYYYMMDD_HHMMSS は日時として別の行に出す
-// 例: origin_counter_clockwise_20261031_143012 → "origin_counter_clockwise" と "10/31 14:30"
+// 例: mirror_right_20261031_143012 → "mirror_right" と "10/31 14:30"
 void drawModelName(int y) {
     String name = model_name.length() > 0 ? model_name : "---";
     String stamp = "";
@@ -572,7 +572,7 @@ void drawModelName(int y) {
     M5.Lcd.setTextSize(1);
     M5.Lcd.setCursor(10, y);
     M5.Lcd.print("model :");
-    // 大きさ 2 で 1 行に入るのは 25 文字まで（origin_counter_clockwise は 24 文字）
+    // 大きさ 2 で 1 行に入るのは 25 文字まで（枠の名前は最長 12 文字の origin_right）
     M5.Lcd.setTextSize(2);
     M5.Lcd.setCursor(10, y + 11);
     M5.Lcd.print(name.substring(0, 25));

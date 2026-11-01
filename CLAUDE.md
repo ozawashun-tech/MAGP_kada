@@ -20,11 +20,14 @@ cd training_src && python3 train.py  # 学習（パラメータは train.py 末�
 
 # L2 補正の繰り返し（PC で実行。SSH で Jetson に接続する）
 make new-session               # コースが変わったとき。今 Jetson にある bag は学習に使わず、モデルの枠も空にする
-make dagger c                  # 新しい bag を c（時計回り）としてセッションに足し、c の bag で学習して origin_clockwise の枠に送る
-make dagger cc                 # 同じく cc（反時計回り）。origin_counter_clockwise の枠に送る
-make mirror c                  # c の bag を左右反転して学習し、mirror_counter_clockwise の枠に送る（新しい bag は足さない）
-make mirror cc                 # cc の bag から mirror_clockwise の枠に送る
-make rollback c                # origin_clockwise の枠を 1 つ前のモデルに戻す（もう一度で元に戻る。cc も同じ）
+make dagger left               # 新しい bag を left（待機場所から見て左のコース）としてセッションに足し、left の bag で学習して origin_left の枠に送る
+                               # 続けて同じ bag を反転して mirror_right の枠にも送る（current.pth は origin のまま）
+make dagger right              # 同じく right（右のコース）。origin_right と mirror_left の枠に送る
+make dagger-mirror right       # 右のコースで mirror_right を走らせて録った bag を「right mirror」として足し、
+                               # mirror_right（車もこちら）と対の origin_left を学習して送る（left も同じ）
+make mirror left               # left の bag を左右反転して学習し、mirror_right の枠に送る（新しい bag は足さない。反転モデルだけ作り直すとき）
+make mirror right              # right の bag から mirror_left の枠に送る
+make rollback left             # origin_left の枠を 1 つ前のモデルに戻す（もう一度で元に戻る。right も同じ）
 ```
 
 - `requirements.txt` には torch を入れない。PC と Jetson で wheel が違うため、`setup.sh` が環境を判別して入れる（Jetson は jetson-ai-lab の index を使う。公式 PyPI 版では GPU が使えない）。
@@ -55,9 +58,9 @@ ROS 2 の ament_python パッケージ群（`src/` 以下）。`urg_node2` だ�
 - 学習データ: rosbag の `/scan`（入力）と `/pwm_input`（教師）を時刻で同期させる（[training_src/dataset.py](training_src/dataset.py)）。教師は「ジョイスティックの値」ではなく「実際にハードウェアに出した PWM」になる。
 - `pwm_mux_node` は `/mux_pwm` を出すたびに出どころ（`manual` / `auto` / `auto_l2`）を `/mux_pwm/source` に出し、bag に記録される。`dataset.py` はこれを `/pwm_input` の各行に付け、`DataPreprocessConfig(source_weights=...)` でラベルごとの重みを決める（0 は除外、ラベルの無い bag は全部 1.0）。`train.py` は `{"manual": 1.0, "auto": 0.0, "auto_l2": 3.0}` を使い、重みが混ざると `WeightedRandomSampler` を使う。
 - `train.py` は引数なしなら `jetson_sync.fetch_latest_bags()` を使い、SSH（`MAGP_JETSON_HOST`、既定 `jetson`）で Jetson の `~/rosbag` から最新の bag を `dataset/train/` に取ってくる。接続できなければローカルの最新 bag を使う。
-- `train.py --session --direction c|cc` は `dataset/train/session.txt`（git 管理外）に並んだ bag のうち、向きが一致するものだけで学習する。session.txt の各行は `rosbag2_<日時> c` のように bag 名と向き（c: 時計回り / cc: 反時計回り）を書く。Jetson にあって一覧に無い bag は、指定した向きとして自動で書き足す（そのため、向きを変える前に `make dagger` を実行しておく）。向きの無い行と、行頭が `#` の bag は使わない。`--bags <名前…>` は bag を直接指定する（Jetson に接続しない）。
-- モデルの枠: Jetson の `/home/jetson/models/` に `origin_clockwise` / `origin_counter_clockwise` / `mirror_clockwise` / `mirror_counter_clockwise` の 4 つの枠（`<枠>.pth`、実体へのシンボリックリンク）を置く。`--session` で学習したモデルは `<枠>_<日時>.pth` に保存する。`--deploy` はそれを Jetson に送り、`<枠>.pth` と `current.pth`（→ `<枠>.pth`）を付け替える。origin の枠は前の行き先を `<枠>.prev.pth` に残し、`make rollback c|cc` で入れ替える。`make new-session` は `current.pth` を実体に張り替えてから枠のリンクを消す（ファイルは消さない）。枠の名前と向きの対応は `jetson_sync.py` の `SLOTS` / `slot_name()`。
-- `train.py --mirror` は、スキャンとステアリングを左右反転して学習する。`--session` なら反対の向きの mirror の枠（c の bag → `mirror_counter_clockwise`）、そうでなければ `my_model_mirror_<日時>.pth` に保存する（左右対称なもう一方のコース用）。自車の写り込みの角度は反転しない。ステアリングは `mirror_steering_center`（1273、ジャイロから求めた直進の PWM）で折り返す。根拠と評価は [WIP.md](WIP.md) を参照。
+- 本番は、待機場所から見て左右に左右対称のコースが 2 つあり、走る向きも鏡写し（`left` / `right`）。片方のコースの走りを左右反転すると、もう片方のコースの走りになる。`train.py --session --course left|right` は `dataset/train/session.txt`（git 管理外）に並んだ bag のうち、コースが一致するものだけで学習する。session.txt の各行は `rosbag2_<日時> left` のように bag 名とコースを書く。Jetson にあって一覧に無い bag は、指定したコースとして自動で書き足す（そのため、コースを変える前に `make dagger` を実行しておく）。コースの無い行と、行頭が `#` の bag は使わない。3 つ目に `mirror` と書いた行（`rosbag2_<日時> right mirror`）は、そのコースで mirror の枠を走らせて録った bag で、反対のコースの bag と一緒に、対の 2 つの枠（`origin_left` と `mirror_right`）の学習に使う。origin では反転し、mirror ではそのまま使う（`sync_session()` が `(パス, mirror で走ったか)` を返し、`train_model(mirror=[...])` で bag ごとに反転を決める）。`--mirror-run`（`make dagger-mirror`）は新しい bag をこの形で書き足し、mirror の枠を先に送って `current.pth` もそちらにする。`--bags <名前…>` は bag を直接指定する（Jetson に接続しない）。
+- モデルの枠: Jetson の `/home/jetson/models/` に `origin_left` / `origin_right` / `mirror_left` / `mirror_right` の 4 つの枠（`<枠>.pth`、実体へのシンボリックリンク）を置く。`--session` で学習したモデルは `<枠>_<日時>.pth` に保存する。`--deploy` はそれを Jetson に送り、`<枠>.pth` と `current.pth`（→ `<枠>.pth`）を付け替える。`--with-mirror`（`make dagger` が付ける）は、続けて同じ bag を反転して学習し、反対のコースの mirror の枠に送る（`deploy_model(switch_current=False)` で `current.pth` は付け替えない）。origin の枠は前の行き先を `<枠>.prev.pth` に残し、`make rollback left|right` で入れ替える。`make new-session` は `current.pth` を実体に張り替えてから枠のリンクを消す（ファイルは消さない）。枠の名前とコースの対応は `jetson_sync.py` の `SLOTS` / `slot_name()`。推論ノードの `slot_names` の初期値と合わせる。
+- `train.py --mirror` は、スキャンとステアリングを左右反転して学習する。`--session` なら反対のコースの mirror の枠（left の bag → `mirror_right`）、そうでなければ `my_model_mirror_<日時>.pth` に保存する（左右対称なもう一方のコース用）。自車の写り込みの角度は反転しない。ステアリングは `mirror_steering_center`（1273、ジャイロから求めた直進の PWM）で折り返す。根拠と評価は [WIP.md](WIP.md) を参照。
 - 保存される `.pth` は dict で、`model_state_dict` に加えて正規化統計（`scan_mean` / `scan_std` / `target_mean` / `target_std`）を含む。推論側はこれを使って正規化と逆正規化をする。
 - **モデル定義は 2 か所にある**: [training_src/model.py](training_src/model.py) と [src/pytorch_pwm_controller/pytorch_pwm_controller/model/model.py](src/pytorch_pwm_controller/pytorch_pwm_controller/model/model.py)。中身は同じ（後者には末尾にコメントアウトされたテストがあるだけ）。片方を変えたら、もう片方も必ず合わせる。
 - `scan_history_length` / `scan_history_stride` は、学習時の値と [launch/autonomous_driving.py](launch/autonomous_driving.py) の推論ノードのパラメータで一致させる。推論ノードは `(length-1)*stride+1` フレームをバッファし、stride ごとに取り出してモデルに入れる。バッファは手動中も更新され続けるが、`/mux_pwm/status` で Manual → Auto に変わると、次のスキャン 1 枚で埋め直す（`reset_history_on_auto`）。
